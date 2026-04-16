@@ -373,6 +373,15 @@ input[type="range"]::-moz-range-thumb {
 
 .btn-stack { display: flex; flex-direction: column; gap: 4px; }
 .btn-stack button { width: 100%; }
+.form-row .unit {
+  color: var(--text-dim);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  flex-shrink: 0;
+}
+.form-row select { flex: 1; min-width: 0; }
+.form-row input[type="number"] { flex: 1; min-width: 0; }
 
 /* ---- tile preview ---- */
 

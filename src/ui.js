@@ -909,6 +909,66 @@ function setupExport() {
     const blob = await state.tileCanvas.exportTile();
     downloadBlob(blob, 'camo-tile.png');
   });
+
+  document.getElementById('btn-print').addEventListener('click', async () => {
+    const paper   = document.getElementById('print-paper').value;
+    const orient  = document.getElementById('print-orient').value;
+    const tileIn  = parseFloat(document.getElementById('print-tile-in').value) || 4;
+    const bleed   = document.getElementById('print-bleed').checked;
+    const blob    = await state.tileCanvas.exportTile();
+    const dataUrl = await blobToDataURL(blob);
+    openPrintWindow(dataUrl, { paper, orient, tileIn, bleed });
+  });
+}
+
+function blobToDataURL(blob) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload  = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(blob);
+  });
+}
+
+function openPrintWindow(dataUrl, { paper, orient, tileIn, bleed }) {
+  const margin = bleed ? '0' : '0.25in';
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>CamoJack Print</title>
+<style>
+  @page { size: ${paper} ${orient}; margin: ${margin}; }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  body {
+    background-image: url('${dataUrl}');
+    background-repeat: repeat;
+    background-size: ${tileIn}in ${tileIn}in;
+    width: 100%;
+    min-height: 100vh;
+    image-rendering: -webkit-optimize-contrast;
+  }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+  .preview-note {
+    position: fixed; top: 8px; left: 8px;
+    font: 12px/1.4 system-ui, sans-serif;
+    background: rgba(255,255,255,0.85); padding: 4px 8px;
+    border: 1px solid #999;
+  }
+  @media print { .preview-note { display: none; } }
+</style></head>
+<body>
+  <div class="preview-note">CamoJack print preview. If print dialog didn't open, press Ctrl/Cmd+P. Close this tab when done.</div>
+  <script>
+    window.addEventListener('load', () => { setTimeout(() => window.print(), 300); });
+  <\/script>
+</body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) {
+    alert('Popup blocked. Allow popups for this site to use print.');
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
 
 function downloadBlob(blob, filename) {

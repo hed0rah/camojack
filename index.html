@@ -437,6 +437,38 @@
           <button id="btn-export-sheet" class="btn-accent">Export Sheet PNG</button>
           <button id="btn-export-tile">Export Tile PNG</button>
         </div>
+
+        <div class="section-title section-gap">PRINT</div>
+        <div class="form-row">
+          <label>Paper</label>
+          <select id="print-paper">
+            <option value="letter">Letter 8.5x11"</option>
+            <option value="legal">Legal 8.5x14"</option>
+            <option value="tabloid">Tabloid 11x17"</option>
+            <option value="a3">A3</option>
+            <option value="a4">A4</option>
+            <option value="a5">A5</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Orient</label>
+          <select id="print-orient">
+            <option value="portrait">Portrait</option>
+            <option value="landscape">Landscape</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Tile Size</label>
+          <input type="number" id="print-tile-in" min="0.5" max="24" step="0.25" value="4">
+          <span class="unit">in</span>
+        </div>
+        <div class="form-row">
+          <label>Bleed</label>
+          <input type="checkbox" id="print-bleed" checked>
+        </div>
+        <div class="btn-stack">
+          <button id="btn-print" class="btn-accent">Print Tiled Page</button>
+        </div>
       </aside>
 
     </div>
