@@ -9,7 +9,7 @@ export const PATTERN_PRESETS = {
     palette: 'woodland',
     params: {
       'ct-scale': 1.6, 'ct-stretch': 2.2, 'ct-warp': 0.9,
-      'ct-sharpness': 0.90, 'ct-coverage': 0.45,
+      'ct-sharpness': 0.90, 'ct-coverage': 0.55, 'ct-puzzle': 1,
     },
   },
   dpm: {
@@ -18,7 +18,7 @@ export const PATTERN_PRESETS = {
     palette: 'dpm',
     params: {
       'ct-scale': 2.0, 'ct-stretch': 1.8, 'ct-warp': 1.0,
-      'ct-sharpness': 0.88, 'ct-coverage': 0.40,
+      'ct-sharpness': 0.88, 'ct-coverage': 0.50, 'ct-puzzle': 1,
     },
   },
   tiger_stripe: {
@@ -36,7 +36,7 @@ export const PATTERN_PRESETS = {
     palette: 'frogskin',
     params: {
       'ct-scale': 3.5, 'ct-stretch': 1.2, 'ct-warp': 0.6,
-      'ct-sharpness': 0.92, 'ct-coverage': 0.50,
+      'ct-sharpness': 0.92, 'ct-coverage': 0.55, 'ct-puzzle': 1,
     },
   },
   denison: {
@@ -45,7 +45,7 @@ export const PATTERN_PRESETS = {
     palette: 'denison',
     params: {
       'ct-scale': 1.5, 'ct-stretch': 2.5, 'ct-warp': 1.2,
-      'ct-sharpness': 0.75, 'ct-coverage': 0.50,
+      'ct-sharpness': 0.75, 'ct-coverage': 0.55, 'ct-puzzle': 1,
     },
   },
   lizard: {
@@ -54,7 +54,7 @@ export const PATTERN_PRESETS = {
     palette: 'lizard',
     params: {
       'ct-scale': 2.5, 'ct-stretch': 3.0, 'ct-warp': 0.7,
-      'ct-sharpness': 0.90, 'ct-coverage': 0.42,
+      'ct-sharpness': 0.90, 'ct-coverage': 0.50, 'ct-puzzle': 1,
     },
   },
 
@@ -77,7 +77,7 @@ export const PATTERN_PRESETS = {
     palette: 'multicam',
     params: {
       'ct-scale': 2.2, 'ct-stretch': 1.8, 'ct-warp': 1.5,
-      'ct-sharpness': 0.50, 'ct-coverage': 0.40,
+      'ct-sharpness': 0.50, 'ct-coverage': 0.55, 'ct-puzzle': 1,
     },
   },
   flecktarn_preset: {
@@ -97,7 +97,7 @@ export const PATTERN_PRESETS = {
     palette: 'telo',
     params: {
       'ct-scale': 1.4, 'ct-stretch': 1.5, 'ct-warp': 0.5,
-      'ct-sharpness': 0.92, 'ct-coverage': 0.50,
+      'ct-sharpness': 0.92, 'ct-coverage': 0.55, 'ct-puzzle': 1,
     },
   },
   splinter: {

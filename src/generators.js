@@ -1,7 +1,7 @@
 // camo pattern generators
 // each fills a 2D canvas context at native tile size
 
-import { createNoise, seededRng } from './noise.js';
+import { createNoise, seededRng, tileableSample } from './noise.js';
 import { hexToRgb, lerpColor } from './palettes.js';
 
 // ---- helpers ----
@@ -150,6 +150,7 @@ export function generateNoise(ctx, size, palette, opts = {}) {
     scale        = 2.5,
     octaves      = 5,
     warpStrength = 1.8,
+    tileable     = false,
     seed         = 0,
   } = opts;
 
@@ -162,19 +163,22 @@ export function generateNoise(ctx, size, palette, opts = {}) {
   const imageData = ctx.createImageData(size, size);
   const { data } = imageData;
 
+  const field = (px, py) => {
+    const nx = (px / size) * scale;
+    const ny = (py / size) * scale;
+    const wx = nx + warpStrength * n2.fbm(nx * 0.7, ny * 0.7, 2);
+    const wy = ny + warpStrength * n3.fbm(nx * 0.7 + 4.3, ny * 0.7 + 1.7, 2);
+    return n1.fbm(wx, wy, octaves);
+  };
+
   const vals = new Float32Array(size * size);
   let mn = Infinity, mx = -Infinity;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const nx = (x / size) * scale;
-      const ny = (y / size) * scale;
-
-      // domain warp: offset sample position with low-freq noise
-      const wx = nx + warpStrength * n2.fbm(nx * 0.7, ny * 0.7, 2);
-      const wy = ny + warpStrength * n3.fbm(nx * 0.7 + 4.3, ny * 0.7 + 1.7, 2);
-
-      const v = n1.fbm(wx, wy, octaves);
+      const v = tileable
+        ? tileableSample(x, y, size, size, field)
+        : field(x, y);
       vals[y * size + x] = v;
       if (v < mn) mn = v;
       if (v > mx) mx = v;
@@ -203,6 +207,7 @@ export function generateDigital(ctx, size, palette, opts = {}) {
     cellSize = 5,
     scale    = 3.5,
     octaves  = 3,
+    tileable = false,
     seed     = 0,
   } = opts;
 
@@ -210,16 +215,24 @@ export function generateDigital(ctx, size, palette, opts = {}) {
   const colors = rgbs(palette);
   const nc = colors.length;
 
-  // compute per-cell colors
-  const cols = Math.ceil(size / cellSize);
-  const rows = Math.ceil(size / cellSize);
+  // for clean tiling, snap cell counts so cellSize evenly divides the tile
+  const cols = tileable
+    ? Math.max(1, Math.round(size / cellSize))
+    : Math.ceil(size / cellSize);
+  const rows = cols;
+  const effCell = size / cols;
+
   const cellColors = new Array(rows * cols);
+
+  // FBM field over cell-index space; if tileable, wrap it over (cols, rows)
+  const field = (cx, cy) => n.fbm((cx / cols) * scale, (cy / rows) * scale, octaves);
 
   for (let cr = 0; cr < rows; cr++) {
     for (let cc = 0; cc < cols; cc++) {
-      const nx = (cc / cols) * scale;
-      const ny = (cr / rows) * scale;
-      const v = n.fbm(nx, ny, octaves) * 0.5 + 0.5;
+      const raw = tileable
+        ? tileableSample(cc, cr, cols, rows, field)
+        : field(cc, cr);
+      const v = raw * 0.5 + 0.5;
       cellColors[cr * cols + cc] = colors[paletteIdx(Math.max(0, Math.min(0.9999, v)), nc)];
     }
   }
@@ -229,8 +242,8 @@ export function generateDigital(ctx, size, palette, opts = {}) {
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const cr = Math.min(rows - 1, Math.floor(y / cellSize));
-      const cc = Math.min(cols - 1, Math.floor(x / cellSize));
+      const cr = Math.min(rows - 1, Math.floor(y / effCell));
+      const cc = Math.min(cols - 1, Math.floor(x / effCell));
       const col = cellColors[cr * cols + cc];
       const idx = (y * size + x) * 4;
       data[idx]     = col[0];
@@ -367,6 +380,7 @@ export function generateStripe(ctx, size, palette, opts = {}) {
     angle      = 78,
     edgeNoise  = 0.45,
     contrast   = 0.5,
+    tileable   = false,
     seed       = 0,
   } = opts;
 
@@ -383,14 +397,20 @@ export function generateStripe(ctx, size, palette, opts = {}) {
   const vals = new Float32Array(size * size);
   let mn = Infinity, mx = -Infinity;
 
+  const field = (px, py) => {
+    const nx = px / size, ny = py / size;
+    const rx = nx * cosA + ny * sinA;
+    const ry = -nx * sinA + ny * cosA;
+    const stripe = n1.fbm(rx * stripeFreq, ry * flowFreq, 3, 2.0, 0.5);
+    const warp   = n2.fbm(nx * 3.5, ny * 3.5, 2) * edgeNoise;
+    return stripe + warp;
+  };
+
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const nx = x / size, ny = y / size;
-      const rx = nx * cosA + ny * sinA;
-      const ry = -nx * sinA + ny * cosA;
-      const stripe = n1.fbm(rx * stripeFreq, ry * flowFreq, 3, 2.0, 0.5);
-      const warp   = n2.fbm(nx * 3.5, ny * 3.5, 2) * edgeNoise;
-      const v = stripe + warp;
+      const v = tileable
+        ? tileableSample(x, y, size, size, field)
+        : field(x, y);
       vals[y * size + x] = v;
       if (v < mn) mn = v;
       if (v > mx) mx = v;
@@ -776,6 +796,7 @@ export function generateHoneycomb(ctx, size, palette, opts = {}) {
     border    = 2,
     depth     = 0.3,
     noise     = 0.15,
+    tileable  = false,
     seed      = 0,
   } = opts;
 
@@ -786,29 +807,57 @@ export function generateHoneycomb(ctx, size, palette, opts = {}) {
   const imageData = ctx.createImageData(size, size);
   const { data } = imageData;
 
-  const r = cellSize;
+  // in tileable mode, snap r so an integer number of hex columns/rows fits the
+  // tile, and stretch y so vertical pitch (sqrt(3)*r) also divides size cleanly.
+  // hexes are slightly anisotropic but the grid geometry tiles.
+  // per-cell color is sampled in pixel space and wrapped with tileableSample,
+  // which is the correct period (size, size) for both color and shade noise.
+  let r = cellSize;
+  let yScale = 1;
+  if (tileable) {
+    const cellsX = Math.max(1, Math.round(size / (3 * r)));
+    r = size / (3 * cellsX);
+    const cellsY = Math.max(1, Math.round(size / (Math.sqrt(3) * r)));
+    yScale = (Math.sqrt(3) * r * cellsY) / size;
+  }
+
+  const noiseRate = 0.2 / r; // matches original 0.3/axial-unit converted to pixel rate
+  const colorNoise = (q, rr) => {
+    if (!tileable) return n.get(q * 0.3, rr * 0.3);
+    const cx = r * (3/2 * q);
+    const cy = (r * (Math.sqrt(3)/2 * q + Math.sqrt(3) * rr)) / yScale;
+    return tileableSample(cx, cy, size, size,
+      (xx, yy) => n.get(xx * noiseRate, yy * noiseRate * yScale));
+  };
+  const cellShade = (q, rr) => {
+    if (!tileable) return n.get(q * 1.7 + 100, rr * 1.7 + 100);
+    const cx = r * (3/2 * q);
+    const cy = (r * (Math.sqrt(3)/2 * q + Math.sqrt(3) * rr)) / yScale;
+    return tileableSample(cx, cy, size, size,
+      (xx, yy) => n.get(xx * noiseRate * 5 + 100, yy * noiseRate * 5 * yScale + 100));
+  };
 
   for (let py = 0; py < size; py++) {
     for (let px = 0; px < size; px++) {
-      // axial hex coords (pointy-top)
+      const pyE = py * yScale;
+      // axial hex coords (flat-top)
       const qf = (px * 2/3) / r;
-      const rf = (-px / 3 + Math.sqrt(3)/3 * py) / r;
+      const rf = (-px / 3 + Math.sqrt(3)/3 * pyE) / r;
       let q = Math.round(qf), rr = Math.round(rf), s = Math.round(-qf - rf);
       const qd = Math.abs(q - qf), rd = Math.abs(rr - rf), sd = Math.abs(s - (-qf - rf));
       if (qd > rd && qd > sd) q = -rr - s;
       else if (rd > sd) rr = -q - s;
 
-      // hex center
+      // hex center (virtual y space, then back to pixel y for dy)
       const cx = r * (3/2 * q);
-      const cy = r * (Math.sqrt(3)/2 * q + Math.sqrt(3) * rr);
-      const dx = px - cx, dy = py - cy;
+      const cyV = r * (Math.sqrt(3)/2 * q + Math.sqrt(3) * rr);
+      const dx = px - cx, dy = pyE - cyV;
       const dist = Math.sqrt(dx * dx + dy * dy) / r;
 
-      // color per cell from noise
-      const nv = n.get(q * 0.3, rr * 0.3) * 0.5 + 0.5;
+      const nv = colorNoise(q, rr) * 0.5 + 0.5;
       const colIdx = Math.min(nc - 1, Math.floor(nv * nc));
       const col = colors[colIdx];
-      const cellNoise = n.get(q * 1.7 + 100, rr * 1.7 + 100) * noise;
+      const cellNoise = cellShade(q, rr) * noise;
 
       // hex edge distance (approximate)
       const ax = Math.abs(dx), ay = Math.abs(dy);
@@ -845,6 +894,7 @@ export function generateCarbon(ctx, size, palette, opts = {}) {
     depth     = 0.4,
     glossy    = 0.2,
     noise     = 0.08,
+    tileable  = false,
     seed      = 0,
   } = opts;
 
@@ -856,7 +906,12 @@ export function generateCarbon(ctx, size, palette, opts = {}) {
   const imageData = ctx.createImageData(size, size);
   const { data } = imageData;
 
-  const w = weaveSize;
+  // for seamless tiling snap weaveSize so size is an exact multiple of 2*w
+  let w = Math.max(1, weaveSize | 0);
+  if (tileable) {
+    const cells = Math.max(1, Math.round(size / (w * 2)));
+    w = Math.max(1, Math.round(size / (cells * 2)));
+  }
   const w2 = w * 2;
 
   for (let py = 0; py < size; py++) {
@@ -926,6 +981,7 @@ export function generateContour(ctx, size, palette, opts = {}) {
     sharpness  = 0.85,
     coverage   = 0.45,
     puzzle     = 0,     // 0 = layered overlap, 1 = puzzle partition (value bands)
+    tileable   = false,
     seed       = 0,
   } = opts;
 
@@ -934,23 +990,32 @@ export function generateContour(ctx, size, palette, opts = {}) {
   const imageData = ctx.createImageData(size, size);
   const { data } = imageData;
 
+  // sample field at (px, py) image-space coordinates -- composes warp + base noise
+  // factored out so tileableSample can call it at four corner offsets
+  const buildField = (n1, n2, n3) => (px, py) => {
+    const nx = (px / size) * scale / stretch;
+    const ny = (py / size) * scale;
+    const wx = nx + warp * n2.fbm(nx * 0.8, ny * 0.8, 2);
+    const wy = ny + warp * n3.fbm(nx * 0.8 + 3.7, ny * 0.8 + 1.3, 2);
+    return n1.fbm(wx, wy, 3, 2.0, 0.5);
+  };
+
   // -- puzzle mode: one noise field partitioned into value bands --
   // every pixel belongs to exactly one color, shapes fit complementary
   if (puzzle >= 0.5) {
     const n1 = createNoise(seed + 137);
     const n2 = createNoise(seed + 637);
     const n3 = createNoise(seed + 1137);
+    const field = buildField(n1, n2, n3);
 
     const vals = new Float32Array(size * size);
     let mn = Infinity, mx = -Infinity;
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        const nx = (x / size) * scale / stretch;
-        const ny = (y / size) * scale;
-        const wx = nx + warp * n2.fbm(nx * 0.8, ny * 0.8, 2);
-        const wy = ny + warp * n3.fbm(nx * 0.8 + 3.7, ny * 0.8 + 1.3, 2);
-        const v = n1.fbm(wx, wy, 3, 2.0, 0.5);
+        const v = tileable
+          ? tileableSample(x, y, size, size, field)
+          : field(x, y);
         vals[y * size + x] = v;
         if (v < mn) mn = v;
         if (v > mx) mx = v;
@@ -1020,6 +1085,7 @@ export function generateContour(ctx, size, palette, opts = {}) {
     const n2 = createNoise(seed + L * 137 + 500);
     const n3 = createNoise(seed + L * 137 + 1000);
     const col = colors[L];
+    const field = buildField(n1, n2, n3);
 
     const layerCov = coverage * (1 - (L - 1) / nc * 0.7);
 
@@ -1028,11 +1094,9 @@ export function generateContour(ctx, size, palette, opts = {}) {
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        const nx = (x / size) * scale / stretch;
-        const ny = (y / size) * scale;
-        const wx = nx + warp * n2.fbm(nx * 0.8, ny * 0.8, 2);
-        const wy = ny + warp * n3.fbm(nx * 0.8 + 3.7, ny * 0.8 + 1.3, 2);
-        const v = n1.fbm(wx, wy, 3, 2.0, 0.5);
+        const v = tileable
+          ? tileableSample(x, y, size, size, field)
+          : field(x, y);
         vals[y * size + x] = v;
         if (v < mn) mn = v;
         if (v > mx) mx = v;

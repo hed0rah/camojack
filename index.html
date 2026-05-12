@@ -92,6 +92,17 @@
           </select>
         </div>
 
+        <div class="section-title section-gap">MY PRESETS</div>
+        <div class="form-row">
+          <select id="user-preset"><option value="">-- Saved --</option></select>
+          <button id="btn-preset-save" title="Save current settings">Save</button>
+          <button id="btn-preset-delete" title="Delete selected preset">X</button>
+        </div>
+        <div class="form-row">
+          <button id="btn-preset-copy" title="Copy current settings as JSON">Copy JSON</button>
+          <button id="btn-preset-paste" title="Paste settings JSON from clipboard">Paste JSON</button>
+        </div>
+
         <div class="section-title section-gap">GENERATOR</div>
         <div class="form-row">
           <label>Algo</label>
@@ -130,10 +141,16 @@
           <button id="btn-rand-seed" title="Randomize seed">&#8635;</button>
         </div>
 
+        <div class="form-row">
+          <label for="gen-tileable" title="Wrap noise fields so the tile repeats seamlessly">Seamless</label>
+          <input type="checkbox" id="gen-tileable" checked>
+        </div>
+
         <div id="gen-params"></div>
 
         <div class="btn-stack">
           <button id="btn-generate" class="btn-accent">Generate</button>
+          <button id="btn-vary" title="Re-run with params nudged by +/-10%">Vary</button>
           <button id="btn-randomize">Randomize All</button>
         </div>
 
@@ -249,6 +266,11 @@
         </div>
 
         <div id="palette-swatches"></div>
+
+        <div class="form-row">
+          <label for="palette-lock" title="When checked, Randomize All keeps the current palette">Lock</label>
+          <input type="checkbox" id="palette-lock">
+        </div>
 
         <div class="form-row">
           <select id="random-biome">

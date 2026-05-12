@@ -82,6 +82,21 @@ export function createNoise(seed = 0) {
   return { get, fbm };
 }
 
+/**
+ * Make any scalar field of (x, y) seamlessly tileable over (sx, sy).
+ * Uses 4-corner bilinear blend: by construction f(0, y) == f(sx, y) and
+ * f(x, 0) == f(x, sy). Costs 4x field evaluations per pixel.
+ * Variance dips slightly in the center vs edges -- acceptable for camo.
+ */
+export function tileableSample(x, y, sx, sy, fn) {
+  const u = x / sx, v = y / sy;
+  const a = fn(x,      y     );
+  const b = fn(x - sx, y     );
+  const c = fn(x,      y - sy);
+  const d = fn(x - sx, y - sy);
+  return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+}
+
 /** Simple seeded PRNG, returns a function that yields [0, 1) each call. */
 export function seededRng(seed) {
   let s = seed >>> 0;

@@ -49,6 +49,7 @@ export function initUI(tc) {
   setupToolbar();
   setupGeneratorPanel();
   setupPresetPanel();
+  setupUserPresets();
   setupBlendPanel();
   setupPalettePanel();
   setupBrushPanel();
@@ -265,6 +266,12 @@ function setupGeneratorPanel() {
     runGenerator();
   });
 
+  const tileableCb = document.getElementById('gen-tileable');
+  if (tileableCb) tileableCb.addEventListener('change', runGenerator);
+
+  const varyBtn = document.getElementById('btn-vary');
+  if (varyBtn) varyBtn.addEventListener('click', varyParams);
+
   const repeatSel = document.getElementById('preview-repeat');
   repeatSel.addEventListener('change', () => {
     const n = parseInt(repeatSel.value);
@@ -313,12 +320,15 @@ function randomizeAll() {
   state.generator = algo;
   document.getElementById('gen-algo').value = algo;
 
-  const palKey = pickRandom(PALETTE_KEYS);
-  state.palette = getPaletteColors(palKey);
-  PALETTES.custom.colors = [...state.palette];
-  document.getElementById('palette-preset').value = palKey;
-  renderSwatches();
-  setActiveSwatch(0);
+  const paletteLocked = !!document.getElementById('palette-lock')?.checked;
+  if (!paletteLocked) {
+    const palKey = pickRandom(PALETTE_KEYS);
+    state.palette = getPaletteColors(palKey);
+    PALETTES.custom.colors = [...state.palette];
+    document.getElementById('palette-preset').value = palKey;
+    renderSwatches();
+    setActiveSwatch(0);
+  }
 
   state.seed = Math.floor(Math.random() * 65536);
   document.getElementById('gen-seed').value = state.seed;
@@ -336,12 +346,33 @@ function randomizeAll() {
   runGenerator();
 }
 
+// nudge every slider in the current generator's param panel by +/- ~10% of its range,
+// keep generator/palette fixed, then regenerate. lets you explore a neighborhood.
+function varyParams() {
+  const jitter = 0.10;
+  document.querySelectorAll('#gen-params input[type="range"]').forEach(sl => {
+    const min = parseFloat(sl.min), max = parseFloat(sl.max);
+    const step = parseFloat(sl.step) || 0.01;
+    const range = max - min;
+    const cur = parseFloat(sl.value);
+    const delta = (Math.random() * 2 - 1) * range * jitter;
+    let next = cur + delta;
+    // snap to nearest step
+    next = Math.round((next - min) / step) * step + min;
+    next = Math.max(min, Math.min(max, next));
+    sl.value = next;
+    if (sl.nextElementSibling) sl.nextElementSibling.textContent = fmtVal(next);
+  });
+  runGenerator();
+}
+
 function runGenerator() {
   const tc  = state.tileCanvas;
   const ctx = tc.ctx;
   const sz  = tc.size;
   const pal = state.palette;
   const seed = state.seed;
+  const tileable = !!document.getElementById('gen-tileable')?.checked;
 
   tc.pushHistory();
 
@@ -349,13 +380,13 @@ function runGenerator() {
     case 'voronoi':
       generateVoronoi(ctx, sz, pal, { seedCount: getParam('seed-count', 12)|0, scale: getParam('gen-scale', 1.0), softness: getParam('gen-softness', 0.25), border: getParam('gen-border', 0.35), seed }); break;
     case 'noise':
-      generateNoise(ctx, sz, pal, { scale: getParam('gen-scale', 2.5), octaves: getParam('gen-octaves', 5)|0, warpStrength: getParam('gen-warp', 1.8), seed }); break;
+      generateNoise(ctx, sz, pal, { scale: getParam('gen-scale', 2.5), octaves: getParam('gen-octaves', 5)|0, warpStrength: getParam('gen-warp', 1.8), tileable, seed }); break;
     case 'digital':
-      generateDigital(ctx, sz, pal, { cellSize: getParam('gen-cell', 5)|0, scale: getParam('gen-scale', 3.5), octaves: getParam('gen-octaves', 3)|0, seed }); break;
+      generateDigital(ctx, sz, pal, { cellSize: getParam('gen-cell', 5)|0, scale: getParam('gen-scale', 3.5), octaves: getParam('gen-octaves', 3)|0, tileable, seed }); break;
     case 'blotch':
       generateBlotch(ctx, sz, pal, { count: getParam('blob-count', 20)|0, minSize: getParam('blob-min', 0.04), maxSize: getParam('blob-max', 0.18), softness: getParam('gen-softness', 0.25), blobNoise: getParam('blob-noise', 0.60), seed }); break;
     case 'stripe':
-      generateStripe(ctx, sz, pal, { stripeFreq: getParam('stripe-freq', 6.0), flowFreq: getParam('stripe-flow', 0.8), angle: getParam('stripe-angle', 78), edgeNoise: getParam('stripe-edge', 0.45), contrast: getParam('stripe-contrast', 0.5), seed }); break;
+      generateStripe(ctx, sz, pal, { stripeFreq: getParam('stripe-freq', 6.0), flowFreq: getParam('stripe-flow', 0.8), angle: getParam('stripe-angle', 78), edgeNoise: getParam('stripe-edge', 0.45), contrast: getParam('stripe-contrast', 0.5), tileable, seed }); break;
     case 'brushstroke':
       generateBrushstroke(ctx, sz, pal, { layers: getParam('brush-layers', 4)|0, blobsPer: getParam('brush-blobs', 7)|0, sizeMin: getParam('brush-min', 0.10), sizeMax: getParam('brush-max', 0.28), softness: getParam('gen-softness', 0.30), jitter: getParam('brush-jitter', 0.50), elongation: getParam('brush-elong', 0.40), seed }); break;
     case 'fleck':
@@ -367,11 +398,11 @@ function runGenerator() {
     case 'geometric':
       generateGeometric(ctx, sz, pal, { cellCount: getParam('geo-cells', 18)|0, angularity: getParam('geo-angular', 0.50), scale: getParam('gen-scale', 1.0), seed }); break;
     case 'honeycomb':
-      generateHoneycomb(ctx, sz, pal, { cellSize: getParam('hex-cell', 20)|0, border: getParam('hex-border', 2), depth: getParam('hex-depth', 0.30), noise: getParam('hex-noise', 0.15), seed }); break;
+      generateHoneycomb(ctx, sz, pal, { cellSize: getParam('hex-cell', 20)|0, border: getParam('hex-border', 2), depth: getParam('hex-depth', 0.30), noise: getParam('hex-noise', 0.15), tileable, seed }); break;
     case 'carbon':
-      generateCarbon(ctx, sz, pal, { weaveSize: getParam('cf-weave', 8)|0, depth: getParam('cf-depth', 0.40), glossy: getParam('cf-gloss', 0.20), noise: getParam('cf-noise', 0.08), seed }); break;
+      generateCarbon(ctx, sz, pal, { weaveSize: getParam('cf-weave', 8)|0, depth: getParam('cf-depth', 0.40), glossy: getParam('cf-gloss', 0.20), noise: getParam('cf-noise', 0.08), tileable, seed }); break;
     case 'contour':
-      generateContour(ctx, sz, pal, { scale: getParam('ct-scale', 1.8), stretch: getParam('ct-stretch', 2.0), warp: getParam('ct-warp', 0.8), sharpness: getParam('ct-sharpness', 0.85), coverage: getParam('ct-coverage', 0.45), puzzle: getParam('ct-puzzle', 0), seed }); break;
+      generateContour(ctx, sz, pal, { scale: getParam('ct-scale', 1.8), stretch: getParam('ct-stretch', 2.0), warp: getParam('ct-warp', 0.8), sharpness: getParam('ct-sharpness', 0.85), coverage: getParam('ct-coverage', 0.45), puzzle: getParam('ct-puzzle', 0), tileable, seed }); break;
   }
 
   tc.updatePreview();
@@ -414,6 +445,174 @@ function setupPresetPanel() {
 
     runGenerator();
   });
+}
+
+// ---- user-defined presets (localStorage) + JSON clipboard ----
+
+const USER_PRESET_KEY = 'camojack:userPresets';
+
+function loadUserPresets() {
+  try {
+    const raw = localStorage.getItem(USER_PRESET_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveUserPresets(list) {
+  try { localStorage.setItem(USER_PRESET_KEY, JSON.stringify(list)); } catch {}
+}
+
+// snapshot current generator + palette + seed + tileable + all visible slider values
+function captureState() {
+  const params = {};
+  document.querySelectorAll('#gen-params input[type="range"]').forEach(sl => {
+    params[sl.id] = parseFloat(sl.value);
+  });
+  const palKey = document.getElementById('palette-preset')?.value || 'custom';
+  return {
+    generator: state.generator,
+    paletteKey: palKey,
+    paletteColors: [...state.palette],
+    seed: state.seed,
+    tileable: !!document.getElementById('gen-tileable')?.checked,
+    params,
+  };
+}
+
+// reverse of captureState: drive UI back into the recorded state, then regenerate
+function applyState(s) {
+  if (!s || typeof s !== 'object') return false;
+  // require at least one of the meaningful fields, otherwise a malformed paste
+  // would silently no-op and look like success
+  if (!s.generator && !Array.isArray(s.paletteColors) && !s.params) return false;
+
+  if (s.generator) {
+    state.generator = s.generator;
+    const algoSel = document.getElementById('gen-algo');
+    if (algoSel) algoSel.value = s.generator;
+    renderParams(s.generator);
+  }
+
+  if (Array.isArray(s.paletteColors) && s.paletteColors.length &&
+      s.paletteColors.every(c => typeof c === 'string' && /^#?[0-9a-fA-F]{6}$/.test(c))) {
+    state.palette = s.paletteColors.map(c => c.replace('#', '').toLowerCase());
+    PALETTES.custom.colors = [...state.palette];
+    const palSel = document.getElementById('palette-preset');
+    if (palSel) palSel.value = s.paletteKey || 'custom';
+    renderSwatches();
+    setActiveSwatch(0);
+  }
+
+  if (typeof s.seed === 'number') {
+    state.seed = s.seed;
+    const seedIn = document.getElementById('gen-seed');
+    if (seedIn) seedIn.value = s.seed;
+  }
+
+  const tileCb = document.getElementById('gen-tileable');
+  if (tileCb && typeof s.tileable === 'boolean') tileCb.checked = s.tileable;
+
+  if (s.params && typeof s.params === 'object') {
+    for (const [id, val] of Object.entries(s.params)) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.value = val;
+        if (el.nextElementSibling) el.nextElementSibling.textContent = fmtVal(parseFloat(val));
+      }
+    }
+  }
+
+  document.getElementById('pattern-preset').value = '';
+  runGenerator();
+  return true;
+}
+
+function refreshUserPresetSelect() {
+  const sel = document.getElementById('user-preset');
+  if (!sel) return;
+  const list = loadUserPresets();
+  sel.innerHTML = '<option value="">-- Saved --</option>' +
+    list.map((p, i) => `<option value="${i}">${escapeHtml(p.name)}</option>`).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function setupUserPresets() {
+  const sel = document.getElementById('user-preset');
+  if (!sel) return;
+  refreshUserPresetSelect();
+
+  sel.addEventListener('change', () => {
+    const idx = parseInt(sel.value);
+    if (Number.isNaN(idx)) return;
+    const entry = loadUserPresets()[idx];
+    if (entry) applyState(entry.state);
+  });
+
+  document.getElementById('btn-preset-save')?.addEventListener('click', () => {
+    const name = prompt('Name this preset:');
+    if (!name) return;
+    const list = loadUserPresets();
+    const entry = { name: name.slice(0, 64), state: captureState() };
+    // overwrite same-named
+    const existing = list.findIndex(p => p.name === entry.name);
+    if (existing >= 0) list[existing] = entry; else list.push(entry);
+    saveUserPresets(list);
+    refreshUserPresetSelect();
+    sel.value = String(list.findIndex(p => p.name === entry.name));
+    flashButton('btn-preset-save', 'Saved');
+  });
+
+  document.getElementById('btn-preset-delete')?.addEventListener('click', () => {
+    const idx = parseInt(sel.value);
+    if (Number.isNaN(idx)) return;
+    const list = loadUserPresets();
+    const entry = list[idx];
+    if (!entry) return;
+    if (!confirm(`Delete preset "${entry.name}"?`)) return;
+    list.splice(idx, 1);
+    saveUserPresets(list);
+    refreshUserPresetSelect();
+  });
+
+  document.getElementById('btn-preset-copy')?.addEventListener('click', async () => {
+    const json = JSON.stringify(captureState(), null, 2);
+    try {
+      await navigator.clipboard.writeText(json);
+      flashButton('btn-preset-copy', 'Copied!');
+    } catch {
+      // fallback: dump into prompt so user can manual copy
+      prompt('Copy this JSON:', json);
+    }
+  });
+
+  document.getElementById('btn-preset-paste')?.addEventListener('click', async () => {
+    let text = '';
+    try { text = await navigator.clipboard.readText(); } catch {}
+    if (!text) text = prompt('Paste preset JSON:') || '';
+    if (!text) return;
+    try {
+      const obj = JSON.parse(text);
+      if (!applyState(obj)) throw new Error('invalid');
+      flashButton('btn-preset-paste', 'Loaded!');
+    } catch (e) {
+      alert('Could not parse preset JSON.');
+    }
+  });
+}
+
+function flashButton(id, msg) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  const prev = btn.textContent;
+  btn.textContent = msg;
+  setTimeout(() => { btn.textContent = prev; }, 900);
 }
 
 // ---- pattern blending ----
