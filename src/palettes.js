@@ -139,7 +139,7 @@ export const PALETTES = {
   },
   desert6: {
     label: '6-Color Desert (DBDU)',
-    colors: ['2a1c10', '5c4020', '8c6c38', 'c8a060', '1a1208'],
+    colors: ['1a1208', '4c3820', '785838', '9c8458', 'c8a060'],
   },
   strichtarn: {
     label: 'Strichtarn (DDR)',

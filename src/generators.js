@@ -770,99 +770,172 @@ export function generateChip(ctx, size, palette, opts = {}) {
   } = opts;
 
   const rng = seededRng(seed);
-  const n   = createNoise(seed + 20);
   const colors = rgbs(palette);
   const nc = colors.length;
 
   const imageData = ctx.createImageData(size, size);
   const { data } = imageData;
-  fillBg(data, size, colors[0]);
 
-  // consistent light direction for shadows
-  const lightAngle = 2.3; // roughly upper-left
+  // chocolate chip semantics differ from most generators:
+  // background is the LIGHTEST color (sand/khaki), chips are the DARKEST
+  // (rocks/pebbles), big blobs are middle browns. Palette is dark->light
+  // by convention, so map accordingly.
+  const bgIdx   = nc - 1;
+  const chipIdx = 0;
+  fillBg(data, size, colors[bgIdx]);
+
+  // consistent light direction for shadows (upper-left)
+  const lightAngle = 2.3;
   const shadowDx = Math.cos(lightAngle);
   const shadowDy = Math.sin(lightAngle);
 
-  const midColors = Math.max(1, nc - 1);
+  // ---- BIG BLOBS underneath ----
+  // each blob = a tiny metaball cluster (1 core + 1-3 small satellites)
+  // produces smooth rounded splotches instead of the angular-noise stars
+  // that this generator used to produce.
+  // pick from middle indices so we don't reuse bg or chip color
+  const midLo = 1, midHi = Math.max(midLo, nc - 2);
+  const blobClusters = [];
   for (let b = 0; b < blobCount; b++) {
     const cx = rng() * size;
     const cy = rng() * size;
     const r  = (blobMin + rng() * (blobMax - blobMin)) * size;
-    const colIdx = 1 + Math.floor(rng() * Math.min(midColors, nc - 1));
-    const col = colors[Math.min(colIdx, nc - 1)];
+    const colIdx = midLo + Math.floor(rng() * (midHi - midLo + 1));
 
-    for (const [ox, oy] of toroidalOffsets(cx, cy, r * 1.5, size)) {
-      const bcx = cx + ox, bcy = cy + oy;
-      const x0 = Math.max(0, Math.ceil(bcx - r * 1.5));
-      const x1 = Math.min(size - 1, Math.floor(bcx + r * 1.5));
-      const y0 = Math.max(0, Math.ceil(bcy - r * 1.5));
-      const y1 = Math.min(size - 1, Math.floor(bcy + r * 1.5));
+    const localBlobs = [{ x: cx, y: cy, r }];
+    const nSat = 1 + Math.floor(rng() * 3);
+    for (let i = 0; i < nSat; i++) {
+      const angle = rng() * Math.PI * 2;
+      const d = r * (0.4 + rng() * 0.5);
+      localBlobs.push({
+        x: cx + Math.cos(angle) * d,
+        y: cy + Math.sin(angle) * d,
+        r: r * (0.4 + rng() * 0.4),
+      });
+    }
 
-      for (let py = y0; py <= y1; py++) {
-        for (let px = x0; px <= x1; px++) {
-          const ddx = px - bcx, ddy = py - bcy;
-          const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-          const angle = Math.atan2(ddy, ddx);
-          const pertR = r * (1 + 0.4 * n.get(
-            Math.cos(angle) * 1.5 + b * 0.3,
-            Math.sin(angle) * 1.5 + b * 0.3
-          ));
-          if (dist > pertR) continue;
-          const softEdge = pertR * (1 - softness);
-          let alpha = dist <= softEdge ? 1 : 1 - (dist - softEdge) / (pertR - softEdge + 0.001);
-          alpha = Math.max(0, Math.min(1, alpha));
-          const i = (py * size + px) * 4;
-          data[i]     = Math.round(data[i]     * (1 - alpha) + col[0] * alpha);
-          data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + col[1] * alpha);
-          data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + col[2] * alpha);
+    // toroidal expansion for seamless tiling
+    const wrapped = [];
+    for (const wb of localBlobs) {
+      const reach = wb.r * 3;
+      for (const [ox, oy] of toroidalOffsets(wb.x, wb.y, reach, size)) {
+        wrapped.push({ x: wb.x + ox, y: wb.y + oy, r: wb.r });
+      }
+    }
+    blobClusters.push({ wrapped, colIdx });
+  }
+
+  // metaball field accumulation -- track winning cluster per pixel
+  const fieldMax = new Float32Array(size * size);
+  const winner   = new Int16Array(size * size).fill(-1);
+
+  for (let c = 0; c < blobClusters.length; c++) {
+    const { wrapped } = blobClusters[c];
+    let ax0 = size, ay0 = size, ax1 = 0, ay1 = 0;
+    for (const wb of wrapped) {
+      const reach = wb.r * 3;
+      if (wb.x - reach < ax0) ax0 = wb.x - reach;
+      if (wb.y - reach < ay0) ay0 = wb.y - reach;
+      if (wb.x + reach > ax1) ax1 = wb.x + reach;
+      if (wb.y + reach > ay1) ay1 = wb.y + reach;
+    }
+    const x0 = Math.max(0, Math.floor(ax0));
+    const y0 = Math.max(0, Math.floor(ay0));
+    const x1 = Math.min(size - 1, Math.ceil(ax1));
+    const y1 = Math.min(size - 1, Math.ceil(ay1));
+
+    for (let py = y0; py <= y1; py++) {
+      const rowBase = py * size;
+      for (let px = x0; px <= x1; px++) {
+        let sum = 0;
+        for (let k = 0; k < wrapped.length; k++) {
+          const wb = wrapped[k];
+          const dx = px - wb.x, dy = py - wb.y;
+          const d2 = dx * dx + dy * dy;
+          const r2 = wb.r * wb.r;
+          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
+        }
+        if (sum > 0) {
+          const i = rowBase + px;
+          if (sum > fieldMax[i]) { fieldMax[i] = sum; winner[i] = c; }
         }
       }
     }
   }
 
-  // store chip positions for shadow pass
-  const chipCol = colors[nc - 1];
+  const blobThreshold = 1.3;
+  const softBand = softness > 0 ? blobThreshold * softness : 0;
+  for (let i = 0; i < size * size; i++) {
+    if (fieldMax[i] <= blobThreshold) continue;
+    const w = winner[i];
+    if (w < 0) continue;
+    const col = colors[blobClusters[w].colIdx];
+    const alpha = softBand > 0
+      ? Math.min(1, (fieldMax[i] - blobThreshold) / softBand)
+      : 1;
+    const idx = i * 4;
+    if (alpha >= 1) {
+      data[idx]     = col[0];
+      data[idx + 1] = col[1];
+      data[idx + 2] = col[2];
+    } else {
+      data[idx]     = Math.round(data[idx]     * (1 - alpha) + col[0] * alpha);
+      data[idx + 1] = Math.round(data[idx + 1] * (1 - alpha) + col[1] * alpha);
+      data[idx + 2] = Math.round(data[idx + 2] * (1 - alpha) + col[2] * alpha);
+    }
+  }
+
+  // ---- SMALL CHIPS on top ----
+  // each chip is a small oval pebble (rotated ellipse), not a rotated diamond.
+  // ellipses look like rocks; diamonds look like spiky stars (the user's complaint).
+  const chipCol = colors[chipIdx];
   const chips = [];
   for (let c = 0; c < chipCount; c++) {
     const cx = rng() * size;
     const cy = rng() * size;
     const r  = Math.max(2, chipSize + Math.round((rng() - 0.5) * 3));
+    const aspect = 0.55 + rng() * 0.40;  // ratio of minor/major axis
     const ca = rng() * Math.PI * 2;
-    chips.push({ cx, cy, r, ca });
+    chips.push({ cx, cy, r, ca, aspect });
   }
 
-  // shadow pass first (rendered behind the chips)
+  // shadow pass: a darkened ellipse offset in the light direction
   if (shadow > 0) {
     const sOff = Math.max(2, Math.round(chipSize * 0.6));
-    for (const { cx, cy, r, ca } of chips) {
+    const shadeFactor = 1 - shadow * 0.5;
+    for (const { cx, cy, r, ca, aspect } of chips) {
       const cosC = Math.cos(ca), sinC = Math.sin(ca);
       const scx = cx + shadowDx * sOff;
       const scy = cy + shadowDy * sOff;
+      const r2 = r * r;
+      const ra2 = r2 * aspect * aspect;
       for (let ddy = -r - 1; ddy <= r + 1; ddy++) {
         for (let ddx = -r - 1; ddx <= r + 1; ddx++) {
           const lx = ddx * cosC + ddy * sinC;
           const ly = -ddx * sinC + ddy * cosC;
-          if (Math.abs(lx) + Math.abs(ly) * 0.7 > r + 0.5) continue;
+          // ellipse SDF
+          if (lx * lx / r2 + ly * ly / ra2 > 1) continue;
           const px = ((Math.round(scx + ddx) % size) + size) % size;
           const py = ((Math.round(scy + ddy) % size) + size) % size;
           const i = (py * size + px) * 4;
-          // darken existing pixel
-          data[i]     = Math.round(data[i]     * (1 - shadow * 0.5));
-          data[i + 1] = Math.round(data[i + 1] * (1 - shadow * 0.5));
-          data[i + 2] = Math.round(data[i + 2] * (1 - shadow * 0.5));
+          data[i]     = Math.round(data[i]     * shadeFactor);
+          data[i + 1] = Math.round(data[i + 1] * shadeFactor);
+          data[i + 2] = Math.round(data[i + 2] * shadeFactor);
         }
       }
     }
   }
 
-  // chip pass on top
-  for (const { cx, cy, r, ca } of chips) {
+  // chip pass: solid ellipse pebbles
+  for (const { cx, cy, r, ca, aspect } of chips) {
     const cosC = Math.cos(ca), sinC = Math.sin(ca);
+    const r2 = r * r;
+    const ra2 = r2 * aspect * aspect;
     for (let ddy = -r; ddy <= r; ddy++) {
       for (let ddx = -r; ddx <= r; ddx++) {
         const lx = ddx * cosC + ddy * sinC;
         const ly = -ddx * sinC + ddy * cosC;
-        if (Math.abs(lx) + Math.abs(ly) * 0.7 > r) continue;
+        if (lx * lx / r2 + ly * ly / ra2 > 1) continue;
         const px = ((Math.round(cx + ddx) % size) + size) % size;
         const py = ((Math.round(cy + ddy) % size) + size) % size;
         const i = (py * size + px) * 4;
