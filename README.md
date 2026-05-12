@@ -1,6 +1,7 @@
 # CamoJack
 
-<img width="256" height="256" alt="CJ-logo3" src="https://github.com/user-attachments/assets/8dbf25a6-d082-449d-815f-f4f71317c1ac" />
+<img width="256" height="256" alt="CJ-logo" src="https://github.com/user-attachments/assets/9cf264a9-fa1d-4478-a29c-18ccb59597c8" />
+
 
 Browser-based camouflage pattern generator and tile editor. Vanilla JS, no framework.
 
