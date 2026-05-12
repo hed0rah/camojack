@@ -5,3 +5,7 @@ dist/
 .vite/
 .env
 .env.local
+
+# local source/working artifacts -- exported files are mirrored to public/
+logo/
+favicon/
