@@ -117,11 +117,12 @@ export const PATTERN_PRESETS = {
   },
   amoeba_preset: {
     label: 'Soviet Amoeba (TTsKO)',
-    generator: 'blotch',
+    generator: 'metaball',
     palette: 'amoeba',
     params: {
-      'blob-count': 25, 'blob-min': 0.05, 'blob-max': 0.15,
-      'gen-softness': 0.20, 'blob-noise': 0.70,
+      'mb-clusters': 8, 'mb-core': 0.13, 'mb-satellites': 6,
+      'mb-spread': 1.15, 'mb-sat-size': 0.65,
+      'mb-threshold': 1.6, 'gen-softness': 0,
     },
   },
   chocolate_chip: {

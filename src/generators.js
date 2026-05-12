@@ -6,7 +6,7 @@ import { hexToRgb, lerpColor } from './palettes.js';
 
 // ---- helpers ----
 
-function poisson(count, size, rng, minDist) {
+export function poisson(count, size, rng, minDist) {
   // Poisson disk sampling with toroidal wrap
   const r = minDist ?? size / Math.sqrt(count * Math.PI * 0.5);
   const pts = [];
@@ -60,11 +60,11 @@ function bsample(data, w, h, x, y) {
   ];
 }
 
-function rgbs(palette) {
+export function rgbs(palette) {
   return palette.map(hexToRgb);
 }
 
-function paletteIdx(v, n) {
+export function paletteIdx(v, n) {
   // v in [0,1], returns palette index
   return Math.min(n - 1, Math.floor(v * n));
 }
@@ -349,9 +349,148 @@ export function generateBlotch(ctx, size, palette, opts = {}) {
   ctx.putImageData(imageData, 0, 0);
 }
 
+// ---- Metaball (smooth lobed blobs -- amoeba, frogskin, duck hunter) ----
+// each "cluster" is a core blob + several satellite blobs around it.
+// per-pixel field = sum of r^2 / (d^2 + 1) for all blobs in a cluster.
+// where field > threshold, paint the dominant cluster's color.
+// this is the right math for camo amoeba shapes; angular noise (used by blotch)
+// is the wrong tool and produces spiky tentacles.
+
+export function generateMetaball(ctx, size, palette, opts = {}) {
+  const {
+    clusters: clusterCount = 18,
+    coreRadius   = 0.08,
+    satellites   = 5,
+    spread       = 0.9,
+    satSize      = 0.65,
+    threshold    = 1.5,
+    softness     = 0,
+    seed         = 0,
+  } = opts;
+
+  const rng = seededRng(seed);
+  const colors = rgbs(palette);
+  const imageData = ctx.createImageData(size, size);
+  const { data } = imageData;
+  fillBg(data, size, colors[0]);
+
+  if (colors.length < 2 || clusterCount < 1) {
+    ctx.putImageData(imageData, 0, 0);
+    return;
+  }
+
+  // poisson-disk cluster centers for even distribution across the tile
+  const centers = poisson(clusterCount, size, rng);
+
+  // build each cluster: 1 core + N satellites, all with toroidal copies pre-expanded.
+  // colIdx in [1, nc-1] -- background (0) stays for non-blob pixels
+  const clusterList = [];
+  for (let c = 0; c < centers.length; c++) {
+    const [cx, cy] = centers[c];
+    const colIdx = 1 + Math.floor(rng() * (colors.length - 1));
+    const coreR = coreRadius * size * (0.7 + rng() * 0.6);
+
+    const localBlobs = [{ x: cx, y: cy, r: coreR }];
+    for (let i = 0; i < satellites; i++) {
+      const angle = (i / satellites) * Math.PI * 2 + (rng() - 0.5) * 0.7;
+      const d = coreR * spread * (0.8 + rng() * 0.5);
+      localBlobs.push({
+        x: cx + Math.cos(angle) * d,
+        y: cy + Math.sin(angle) * d,
+        r: coreR * satSize * (0.7 + rng() * 0.6),
+      });
+    }
+
+    // expand each blob into its toroidal copies (so blobs near a tile edge
+    // contribute to the opposite edge for seamless tiling)
+    const wrapped = [];
+    for (const b of localBlobs) {
+      const reach = b.r * 3;
+      for (const [ox, oy] of toroidalOffsets(b.x, b.y, reach, size)) {
+        wrapped.push({ x: b.x + ox, y: b.y + oy, r: b.r });
+      }
+    }
+
+    clusterList.push({ wrapped, colIdx });
+  }
+
+  // accumulate per-pixel field-max + winning cluster index.
+  // Int16Array works for up to 32767 clusters -- plenty.
+  const fieldMax = new Float32Array(size * size);
+  const winner   = new Int16Array(size * size).fill(-1);
+
+  for (let c = 0; c < clusterList.length; c++) {
+    const { wrapped } = clusterList[c];
+
+    // AABB of this cluster's influence
+    let ax0 = size, ay0 = size, ax1 = 0, ay1 = 0;
+    for (const b of wrapped) {
+      const reach = b.r * 3;
+      if (b.x - reach < ax0) ax0 = b.x - reach;
+      if (b.y - reach < ay0) ay0 = b.y - reach;
+      if (b.x + reach > ax1) ax1 = b.x + reach;
+      if (b.y + reach > ay1) ay1 = b.y + reach;
+    }
+    const x0 = Math.max(0, Math.floor(ax0));
+    const y0 = Math.max(0, Math.floor(ay0));
+    const x1 = Math.min(size - 1, Math.ceil(ax1));
+    const y1 = Math.min(size - 1, Math.ceil(ay1));
+
+    for (let py = y0; py <= y1; py++) {
+      const rowBase = py * size;
+      for (let px = x0; px <= x1; px++) {
+        let sum = 0;
+        for (let k = 0; k < wrapped.length; k++) {
+          const b = wrapped[k];
+          const dx = px - b.x, dy = py - b.y;
+          const d2 = dx * dx + dy * dy;
+          const r2 = b.r * b.r;
+          // dimensionless field: 1 at blob center, 0.5 at radius r, 0.2 at 2r
+          // (limit influence to ~3r for perf)
+          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
+        }
+        if (sum > 0) {
+          const i = rowBase + px;
+          if (sum > fieldMax[i]) {
+            fieldMax[i] = sum;
+            winner[i] = c;
+          }
+        }
+      }
+    }
+  }
+
+  // resolve: paint pixels whose field exceeds threshold
+  const softBand = softness > 0 ? threshold * softness : 0;
+  for (let i = 0; i < size * size; i++) {
+    if (fieldMax[i] <= threshold) continue;
+    const w = winner[i];
+    if (w < 0) continue;
+    const col = colors[clusterList[w].colIdx];
+
+    let alpha = 1;
+    if (softBand > 0) {
+      alpha = Math.min(1, (fieldMax[i] - threshold) / softBand);
+    }
+
+    const idx = i * 4;
+    if (alpha >= 1) {
+      data[idx]     = col[0];
+      data[idx + 1] = col[1];
+      data[idx + 2] = col[2];
+    } else {
+      data[idx]     = Math.round(data[idx]     * (1 - alpha) + col[0] * alpha);
+      data[idx + 1] = Math.round(data[idx + 1] * (1 - alpha) + col[1] * alpha);
+      data[idx + 2] = Math.round(data[idx + 2] * (1 - alpha) + col[2] * alpha);
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+}
+
 // ---- shared helper: toroidal edge offsets ----
 
-function toroidalOffsets(cx, cy, r, size) {
+export function toroidalOffsets(cx, cy, r, size) {
   const off = [[0, 0]];
   if (cx - r < 0)    off.push([ size, 0]);
   if (cx + r > size) off.push([-size, 0]);
@@ -364,7 +503,7 @@ function toroidalOffsets(cx, cy, r, size) {
   return off;
 }
 
-function fillBg(data, size, color) {
+export function fillBg(data, size, color) {
   for (let i = 0; i < size * size; i++) {
     data[i * 4] = color[0]; data[i * 4 + 1] = color[1];
     data[i * 4 + 2] = color[2]; data[i * 4 + 3] = 255;
