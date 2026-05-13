@@ -83,7 +83,9 @@ export const PATTERN_PRESETS = {
     params: {
       'mb-clusters': 15, 'mb-core': 0.09, 'mb-satellites': 5,
       'mb-spread': 1.1, 'mb-sat-size': 0.65,
-      'mb-threshold': 1.5, 'mb-bg': 2, 'gen-softness': 0,
+      'mb-threshold': 1.5, 'mb-bg': 2,
+      'mb-accent': 14, 'mb-accent-core': 0.035, 'mb-accent-thr': 1.7,
+      'gen-softness': 0,
     },
   },
   flecktarn_preset: {

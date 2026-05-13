@@ -1,6 +1,6 @@
 // UI wiring -- connects DOM controls to TileCanvas and generators
 
-import { PALETTES, getPaletteColors, hexToRgb, rgbToHex, rgbToHsl, hslToRgb, generateRandomPalette } from './palettes.js';
+import { PALETTES, getPaletteColors, getPaletteBgIdx, hexToRgb, rgbToHex, rgbToHsl, hslToRgb, generateRandomPalette } from './palettes.js';
 import {
   generateVoronoi, generateNoise, generateDigital, generateBlotch,
   generateStripe, generateBrushstroke, generateFleck,
@@ -186,6 +186,9 @@ const PARAM_DEFS = {
     { id: 'mb-sat-size',   label: 'Lobe Size',min: 0.2,  max: 1.0,  value: 0.65,step: 0.05 },
     { id: 'mb-threshold',  label: 'Threshold',min: 0.5,  max: 4.0,  value: 1.5, step: 0.1  },
     { id: 'mb-bg',         label: 'BG Index', min: 0,    max: 4,    value: 0,   step: 1    },
+    { id: 'mb-accent',     label: 'Accents',  min: 0,    max: 40,   value: 0,   step: 1    },
+    { id: 'mb-accent-core',label: 'AccCore',  min: 0.02, max: 0.10, value: 0.04,step: 0.005},
+    { id: 'mb-accent-thr', label: 'AccThresh',min: 0.8,  max: 3.0,  value: 1.7, step: 0.05 },
     { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0,   step: 0.05 },
   ],
   stripe: [
@@ -314,6 +317,26 @@ function renderParams(algo) {
     sl.addEventListener('input', () => { vl.textContent = fmtVal(parseFloat(sl.value)); });
     container.appendChild(row);
   }
+  // sync bg sliders to the currently selected palette's recommendation.
+  // presets that explicitly set mb-bg/brush-bg override this later, since
+  // setupPresetPanel applies preset.params AFTER renderParams.
+  syncBgSlidersToPalette();
+}
+
+// when palette changes (and no preset is overriding), point any visible
+// bg slider at the palette's natural bg index.
+function syncBgSlidersToPalette() {
+  const palKey = document.getElementById('palette-preset')?.value;
+  if (!palKey || palKey === 'custom') return;
+  const bgIdx = getPaletteBgIdx(palKey);
+  for (const id of ['mb-bg', 'brush-bg']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const min = parseFloat(el.min), max = parseFloat(el.max);
+    const clamped = Math.min(max, Math.max(min, bgIdx));
+    el.value = clamped;
+    if (el.nextElementSibling) el.nextElementSibling.textContent = fmtVal(clamped);
+  }
 }
 
 function fmtVal(v) {
@@ -398,7 +421,7 @@ function runGenerator() {
     case 'blotch':
       generateBlotch(ctx, sz, pal, { count: getParam('blob-count', 20)|0, minSize: getParam('blob-min', 0.04), maxSize: getParam('blob-max', 0.18), softness: getParam('gen-softness', 0.25), blobNoise: getParam('blob-noise', 0.60), seed }); break;
     case 'metaball':
-      generateMetaball(ctx, sz, pal, { clusters: getParam('mb-clusters', 18)|0, coreRadius: getParam('mb-core', 0.08), satellites: getParam('mb-satellites', 5)|0, spread: getParam('mb-spread', 0.9), satSize: getParam('mb-sat-size', 0.65), threshold: getParam('mb-threshold', 1.5), softness: getParam('gen-softness', 0), bgIdx: getParam('mb-bg', 0)|0, seed }); break;
+      generateMetaball(ctx, sz, pal, { clusters: getParam('mb-clusters', 18)|0, coreRadius: getParam('mb-core', 0.08), satellites: getParam('mb-satellites', 5)|0, spread: getParam('mb-spread', 0.9), satSize: getParam('mb-sat-size', 0.65), threshold: getParam('mb-threshold', 1.5), softness: getParam('gen-softness', 0), bgIdx: getParam('mb-bg', 0)|0, accentClusters: getParam('mb-accent', 0)|0, accentCore: getParam('mb-accent-core', 0.04), accentThreshold: getParam('mb-accent-thr', 1.7), seed }); break;
     case 'stripe':
       generateStripe(ctx, sz, pal, { stripeFreq: getParam('stripe-freq', 6.0), flowFreq: getParam('stripe-flow', 0.8), angle: getParam('stripe-angle', 78), edgeNoise: getParam('stripe-edge', 0.45), contrast: getParam('stripe-contrast', 0.5), tileable, seed }); break;
     case 'brushstroke':
@@ -801,6 +824,8 @@ function setupPalettePanel() {
     }
     renderSwatches();
     setActiveSwatch(0);
+    // point bg sliders at the new palette's natural background
+    syncBgSlidersToPalette();
   });
 
   renderSwatches();

@@ -937,8 +937,10 @@ export class TileCanvas {
     const op  = this.opacity;
     const [rc, gc, bc] = this.color;
 
-    // subsample the recorded path to evenly spaced spine points
-    const spacing = Math.max(2, r * 0.4);
+    // subsample the recorded path to evenly spaced spine points.
+    // tighter spacing keeps the metaball field above threshold between blobs;
+    // earlier spacing of r*0.4 left gaps on fast strokes (thin blob + wide spacing).
+    const spacing = Math.max(2, r * 0.28);
     const spine = [pts[0]];
     let accum = 0;
     for (let i = 1; i < pts.length; i++) {
@@ -952,22 +954,24 @@ export class TileCanvas {
     }
     if (spine.length < 2) spine.push(pts[pts.length - 1]);
 
-    // speed-based radii: drawing fast = thin stroke, slow = thick
+    // speed-based radii: drawing fast = thinner stroke, slow = thicker.
+    // narrower range than before so even fast strokes still produce blobs big
+    // enough to bridge the spine spacing without gaps.
     const speeds = spine.map(p => p.speed || 0);
     const maxSpeed = Math.max(1, ...speeds);
     const spineRadii = spine.map(p => {
       const speedNorm = (p.speed || 0) / maxSpeed;
-      return r * (1.2 - speedNorm * 0.9);
+      return r * (1.0 - speedNorm * 0.5);   // range: 0.5r to 1.0r
     });
-    // smooth so adjacent radii don't jump
     for (let pass = 0; pass < 3; pass++) {
       for (let i = 1; i < spineRadii.length - 1; i++) {
         spineRadii[i] = spineRadii[i] * 0.5 + (spineRadii[i-1] + spineRadii[i+1]) * 0.25;
       }
     }
 
-    // place a metaball at each spine point (chain-of-metaballs along the path)
-    const blobs = spine.map((p, i) => ({ x: p.x, y: p.y, r: spineRadii[i] * 0.55 }));
+    // chain-of-metaballs along the path. blob r multiplier 0.7 plus tighter
+    // spacing ensures adjacent metaball fields overlap above threshold.
+    const blobs = spine.map((p, i) => ({ x: p.x, y: p.y, r: spineRadii[i] * 0.7 }));
 
     const threshold = 1.45;
     const softBand = (1 - this.hardness) * threshold * 0.6;

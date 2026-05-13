@@ -65,8 +65,10 @@ export function rgbs(palette) {
 }
 
 export function paletteIdx(v, n) {
-  // v in [0,1], returns palette index
-  return Math.min(n - 1, Math.floor(v * n));
+  // v notionally in [0,1] but float32->float64 round-trips can leave it
+  // very slightly out of range; clamp both ends so we never return a
+  // negative index (which would index undefined out of the colors array)
+  return Math.min(n - 1, Math.max(0, Math.floor(v * n)));
 }
 
 // ---- Voronoi ----
@@ -366,6 +368,12 @@ export function generateMetaball(ctx, size, palette, opts = {}) {
     threshold    = 1.5,
     softness     = 0,
     bgIdx        = 0,
+    // optional accent pass: smaller clusters painted ON TOP of the main pass.
+    // produces multi-scale patterns like real Multicam (big blobs + small patches).
+    accentClusters  = 0,
+    accentCore      = 0.04,
+    accentSatellites= 3,
+    accentThreshold = 1.7,
     seed         = 0,
   } = opts;
 
@@ -488,6 +496,72 @@ export function generateMetaball(ctx, size, palette, opts = {}) {
       data[idx]     = Math.round(data[idx]     * (1 - alpha) + col[0] * alpha);
       data[idx + 1] = Math.round(data[idx + 1] * (1 - alpha) + col[1] * alpha);
       data[idx + 2] = Math.round(data[idx + 2] * (1 - alpha) + col[2] * alpha);
+    }
+  }
+
+  // ---- optional accent pass: smaller clusters painted on top ----
+  // gives real Multicam its multi-scale character (big base blobs + small patches).
+  // each accent cluster is independent: its own metaball field, threshold, color.
+  // accent shapes overwrite the main pass output where they exceed threshold.
+  if (accentClusters > 0 && blobIdxPool.length > 0) {
+    const accCenters = poisson(accentClusters, size, rng);
+    for (let c = 0; c < accCenters.length; c++) {
+      const [cx, cy] = accCenters[c];
+      const colIdx = blobIdxPool[Math.floor(rng() * blobIdxPool.length)];
+      const col = colors[colIdx];
+      const baseR = accentCore * size * (0.6 + rng() * 0.8);
+
+      const localBlobs = [{ x: cx, y: cy, r: baseR }];
+      for (let i = 0; i < accentSatellites; i++) {
+        const a = (i / accentSatellites) * Math.PI * 2 + (rng() - 0.5) * 0.7;
+        const d = baseR * (0.6 + rng() * 0.5);
+        localBlobs.push({
+          x: cx + Math.cos(a) * d,
+          y: cy + Math.sin(a) * d,
+          r: baseR * (0.5 + rng() * 0.4),
+        });
+      }
+
+      const wrapped = [];
+      for (const b of localBlobs) {
+        const reach = b.r * 3;
+        for (const [ox, oy] of toroidalOffsets(b.x, b.y, reach, size)) {
+          wrapped.push({ x: b.x + ox, y: b.y + oy, r: b.r });
+        }
+      }
+
+      let ax0 = size, ay0 = size, ax1 = 0, ay1 = 0;
+      for (const b of wrapped) {
+        const reach = b.r * 3;
+        if (b.x - reach < ax0) ax0 = b.x - reach;
+        if (b.y - reach < ay0) ay0 = b.y - reach;
+        if (b.x + reach > ax1) ax1 = b.x + reach;
+        if (b.y + reach > ay1) ay1 = b.y + reach;
+      }
+      const x0 = Math.max(0, Math.floor(ax0));
+      const y0 = Math.max(0, Math.floor(ay0));
+      const x1 = Math.min(size - 1, Math.ceil(ax1));
+      const y1 = Math.min(size - 1, Math.ceil(ay1));
+
+      for (let py = y0; py <= y1; py++) {
+        const rowBase = py * size;
+        for (let px = x0; px <= x1; px++) {
+          let sum = 0;
+          for (let k = 0; k < wrapped.length; k++) {
+            const b = wrapped[k];
+            const dx = px - b.x, dy = py - b.y;
+            const d2 = dx * dx + dy * dy;
+            const r2 = b.r * b.r;
+            if (d2 < r2 * 9) sum += r2 / (r2 + d2);
+          }
+          if (sum > accentThreshold) {
+            const idx = (rowBase + px) * 4;
+            data[idx]     = col[0];
+            data[idx + 1] = col[1];
+            data[idx + 2] = col[2];
+          }
+        }
+      }
     }
   }
 
