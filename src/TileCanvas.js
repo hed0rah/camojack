@@ -21,8 +21,8 @@ export class TileCanvas {
     this.color      = [74, 103, 65];
     this.color2     = [40, 30, 20];   // secondary color (gradient, swap)
     this.brushSize  = 20;
-    this.opacity    = 0.80;
-    this.hardness   = 0.50;
+    this.opacity    = 1.0;     // solid by default -- camo is flat-printed
+    this.hardness   = 1.0;     // hard edges by default
     this.spacing    = 0.30;    // stroke spacing as fraction of brush size
     this.brushShape = 'circle';
     this.sprayType  = 'uniform';
@@ -830,80 +830,98 @@ export class TileCanvas {
 
   // ---- paint: blob ----
 
+  // metaball cluster stamp: 1 core + 4-7 satellites, painted where the summed
+  // field exceeds a threshold. produces smooth lobed shapes like real woodland
+  // camo blobs. replaces angular-noise perturbation which produced spiky stars.
   _paintBlob(imageData, cx, cy) {
     const { data, width, height } = imageData;
     const r   = this.brushSize;
     const op  = this.opacity;
     const [rc, gc, bc] = this.color;
     const style = this.blobStyle;
-    const manualScale = this.blobScale > 0;
-    // when manual: perturb range IS the slider value in pixels directly
-    // when auto: perturb range scales proportionally to brush radius
-    const ps = manualScale ? this.blobScale : r;
 
-    const s = this.blobVary ? this._blobSeed++ : 0;
-    const nA = createNoise(s * 7 + 41);
-    const nB = createNoise(s * 13 + 83);
+    // per-stamp RNG (varies when blobVary is on)
+    let s = this.blobVary ? (this._blobSeed++ + 1) : 1337;
+    s = s >>> 0;
+    const rng = () => { s = (Math.imul(1664525, s) + 1013904223) >>> 0; return s / 0x100000000; };
 
-    const elongAngle = this.blobVary ? s * 1.618 * Math.PI : 0;
-    const stretch = style === 'elongated' ? 2.2 : 1;
-    const cosE = Math.cos(elongAngle), sinE = Math.sin(elongAngle);
-
-    // noise frequency per style (controls edge detail level)
-    let freq1, freq2;
+    // style -> cluster shape parameters
+    let nSat, spread, satSize, threshold, anisotropy = 1, axisAngle = 0;
     switch (style) {
-      case 'jagged':    freq1 = 2.8; freq2 = 5.5; break;
-      case 'cloud':     freq1 = 0.8; freq2 = 1.6; break;
-      case 'splat':     freq1 = 1.8; freq2 = 4.0; break;
-      case 'elongated': freq1 = 1.0; freq2 = 2.2; break;
-      default:          freq1 = 1.2; freq2 = 2.8; break; // organic
+      case 'cloud':
+        nSat = 7; spread = 1.0; satSize = 0.80; threshold = 1.2; break;
+      case 'splat':
+        nSat = 6; spread = 1.35; satSize = 0.50; threshold = 1.3; break;
+      case 'elongated':
+        nSat = 5; spread = 1.0; satSize = 0.65; threshold = 1.5;
+        anisotropy = 2.4; axisAngle = rng() * Math.PI * 2; break;
+      case 'jagged':
+        nSat = 4; spread = 0.80; satSize = 0.55; threshold = 1.8; break;
+      default: // organic -- the classic woodland-camo blob
+        nSat = 5; spread = 1.0; satSize = 0.70; threshold = 1.55; break;
     }
 
-    // amplitude: when manual, the slider IS the max perturbation in px
-    // when auto, scale by style-appropriate fraction of radius
-    const amp = manualScale ? 1.0 : (
-      style === 'jagged' ? 0.45 : style === 'cloud' ? 0.30 :
-      style === 'splat' ? 0.55 : style === 'elongated' ? 0.25 : 0.35
-    );
+    // manual perturbation slider scales satellite reach when > 0
+    const reachScale = this.blobScale > 0 ? this.blobScale / Math.max(1, r) : 1.0;
+    const coreR = r * 0.55;
+    const ca = Math.cos(axisAngle), sa = Math.sin(axisAngle);
 
-    const maxPerturb = ps * amp;
-    const reach = r + maxPerturb + (style === 'elongated' ? r * 1.5 : r * 0.6);
-    const x0 = Math.max(0, Math.ceil(cx - reach));
-    const x1 = Math.min(width  - 1, Math.floor(cx + reach));
-    const y0 = Math.max(0, Math.ceil(cy - reach));
-    const y1 = Math.min(height - 1, Math.floor(cy + reach));
+    const blobs = [{ x: cx, y: cy, r: coreR * (0.95 + rng() * 0.15) }];
+    for (let i = 0; i < nSat; i++) {
+      const angle = (i / nSat) * Math.PI * 2 + (rng() - 0.5) * 0.7;
+      const d = coreR * spread * (0.75 + rng() * 0.5) * reachScale;
+      // anisotropic stretch along axisAngle for elongated style
+      const lx = Math.cos(angle) * d * anisotropy;
+      const ly = Math.sin(angle) * d;
+      blobs.push({
+        x: cx + (lx * ca - ly * sa),
+        y: cy + (lx * sa + ly * ca),
+        r: coreR * satSize * (0.7 + rng() * 0.55),
+      });
+    }
+
+    // AABB over all blobs (each blob's metaball field tapers off by ~3r)
+    let ax0 = width, ay0 = height, ax1 = 0, ay1 = 0;
+    for (const b of blobs) {
+      const reach = b.r * 3;
+      if (b.x - reach < ax0) ax0 = b.x - reach;
+      if (b.y - reach < ay0) ay0 = b.y - reach;
+      if (b.x + reach > ax1) ax1 = b.x + reach;
+      if (b.y + reach > ay1) ay1 = b.y + reach;
+    }
+    const x0 = Math.max(0, Math.floor(ax0));
+    const y0 = Math.max(0, Math.floor(ay0));
+    const x1 = Math.min(width - 1, Math.ceil(ax1));
+    const y1 = Math.min(height - 1, Math.ceil(ay1));
+
+    // soft band: lower hardness -> softer edge falloff outside the threshold
+    const softBand = (1 - this.hardness) * threshold * 0.6;
 
     for (let py = y0; py <= y1; py++) {
       for (let px = x0; px <= x1; px++) {
-        let dx = px - cx, dy = py - cy;
-
-        if (style === 'elongated') {
-          const lx = dx * cosE + dy * sinE;
-          const ly = -dx * sinE + dy * cosE;
-          dx = lx / stretch;
-          dy = ly;
+        let sum = 0;
+        for (let k = 0; k < blobs.length; k++) {
+          const b = blobs[k];
+          const dx = px - b.x, dy = py - b.y;
+          const d2 = dx * dx + dy * dy;
+          const r2 = b.r * b.r;
+          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
         }
+        if (sum <= threshold) continue;
 
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const angle = Math.atan2(dy, dx);
-
-        // sample noise on a circle at the angle
-        const nv1 = nA.get(Math.cos(angle) * freq1, Math.sin(angle) * freq1);
-        const nv2 = nB.get(Math.cos(angle) * freq2, Math.sin(angle) * freq2);
-        const noise = nv1 * 0.65 + nv2 * 0.35; // range roughly -1 to 1
-
-        const perturb = maxPerturb * noise;
-        const pr = r + perturb;
-        if (dist > pr) continue;
-
-        const softEdge = pr * (1 - this.hardness);
-        let alpha = dist <= softEdge ? 1 : 1 - (dist - softEdge) / (pr - softEdge + 0.001);
-        alpha = Math.max(0, Math.min(1, alpha)) * op;
+        let alpha;
+        if (softBand <= 0) {
+          alpha = op;
+        } else {
+          alpha = Math.min(1, (sum - threshold) / softBand) * op;
+        }
+        if (alpha <= 0) continue;
 
         const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - alpha) + rc * alpha);
-        data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + gc * alpha);
-        data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bc * alpha);
+        const inv = 1 - alpha;
+        data[i]     = (data[i]     * inv + rc * alpha) | 0;
+        data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
+        data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
       }
     }
   }
@@ -918,29 +936,9 @@ export class TileCanvas {
     const r   = this.brushSize;
     const op  = this.opacity;
     const [rc, gc, bc] = this.color;
-    const style = this.blobStyle;
-    const manualScale = this.blobScale > 0;
-    const ps  = manualScale ? this.blobScale : r;
 
-    const s = this.blobVary ? this._blobSeed++ : 0;
-    const nA = createNoise(s * 7 + 101);
-    const nB = createNoise(s * 13 + 199);
-
-    let freq1, freq2;
-    switch (style) {
-      case 'jagged':    freq1 = 2.8; freq2 = 5.5; break;
-      case 'cloud':     freq1 = 0.8; freq2 = 1.6; break;
-      case 'splat':     freq1 = 1.8; freq2 = 4.0; break;
-      default:          freq1 = 1.2; freq2 = 2.8; break;
-    }
-
-    const amp = manualScale ? 1.0 : (
-      style === 'jagged' ? 0.45 : style === 'cloud' ? 0.30 :
-      style === 'splat' ? 0.55 : 0.35
-    );
-
-    // subsample path to even spacing, preserving speed info
-    const spacing = Math.max(2, r * 0.15);
+    // subsample the recorded path to evenly spaced spine points
+    const spacing = Math.max(2, r * 0.4);
     const spine = [pts[0]];
     let accum = 0;
     for (let i = 1; i < pts.length; i++) {
@@ -954,95 +952,65 @@ export class TileCanvas {
     }
     if (spine.length < 2) spine.push(pts[pts.length - 1]);
 
-    // compute per-spine-point radius from speed
-    // fast = thin (0.3x radius), slow = thick (1.5x radius)
+    // speed-based radii: drawing fast = thin stroke, slow = thick
     const speeds = spine.map(p => p.speed || 0);
     const maxSpeed = Math.max(1, ...speeds);
     const spineRadii = spine.map(p => {
-      const speedNorm = (p.speed || 0) / maxSpeed; // 0 = stopped, 1 = fastest
-      return r * (1.5 - speedNorm * 1.2); // range: 0.3r to 1.5r
+      const speedNorm = (p.speed || 0) / maxSpeed;
+      return r * (1.2 - speedNorm * 0.9);
     });
-    // smooth the radii so there aren't abrupt jumps
+    // smooth so adjacent radii don't jump
     for (let pass = 0; pass < 3; pass++) {
       for (let i = 1; i < spineRadii.length - 1; i++) {
         spineRadii[i] = spineRadii[i] * 0.5 + (spineRadii[i-1] + spineRadii[i+1]) * 0.25;
       }
     }
 
-    const maxR = Math.max(...spineRadii);
-    const maxPerturb = (manualScale ? ps : maxR) * amp;
-    const reach = maxR + maxPerturb;
+    // place a metaball at each spine point (chain-of-metaballs along the path)
+    const blobs = spine.map((p, i) => ({ x: p.x, y: p.y, r: spineRadii[i] * 0.55 }));
 
-    let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
-    for (const p of spine) {
-      if (p.x - reach < bx0) bx0 = p.x - reach;
-      if (p.x + reach > bx1) bx1 = p.x + reach;
-      if (p.y - reach < by0) by0 = p.y - reach;
-      if (p.y + reach > by1) by1 = p.y + reach;
+    const threshold = 1.45;
+    const softBand = (1 - this.hardness) * threshold * 0.6;
+
+    // AABB
+    let ax0 = width, ay0 = height, ax1 = 0, ay1 = 0;
+    for (const b of blobs) {
+      const reach = b.r * 3;
+      if (b.x - reach < ax0) ax0 = b.x - reach;
+      if (b.y - reach < ay0) ay0 = b.y - reach;
+      if (b.x + reach > ax1) ax1 = b.x + reach;
+      if (b.y + reach > ay1) ay1 = b.y + reach;
     }
-    const x0 = Math.max(0, Math.floor(bx0));
-    const x1 = Math.min(width - 1, Math.ceil(bx1));
-    const y0 = Math.max(0, Math.floor(by0));
-    const y1 = Math.min(height - 1, Math.ceil(by1));
+    const x0 = Math.max(0, Math.floor(ax0));
+    const y0 = Math.max(0, Math.floor(ay0));
+    const x1 = Math.min(width - 1, Math.ceil(ax1));
+    const y1 = Math.min(height - 1, Math.ceil(ay1));
 
     for (let py = y0; py <= y1; py++) {
       for (let px = x0; px <= x1; px++) {
-        let minDist = Infinity;
-        let closestT = 0;
-        let closestCx = 0, closestCy = 0;
-        let closestSeg = 0;
-        let closestSegT = 0;
-
-        for (let i = 0; i < spine.length - 1; i++) {
-          const ax = spine[i].x, ay = spine[i].y;
-          const bxx = spine[i+1].x, byy = spine[i+1].y;
-          const abx = bxx - ax, aby = byy - ay;
-          const abLen2 = abx * abx + aby * aby;
-          const apx = px - ax, apy = py - ay;
-          const t = abLen2 > 0 ? Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLen2)) : 0;
-          const cx = ax + abx * t, cy = ay + aby * t;
-          const dx = px - cx, dy = py - cy;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < minDist) {
-            minDist = d;
-            closestT = (i + t) / (spine.length - 1);
-            closestCx = cx;
-            closestCy = cy;
-            closestSeg = i;
-            closestSegT = t;
-          }
+        let sum = 0;
+        for (let k = 0; k < blobs.length; k++) {
+          const b = blobs[k];
+          const dx = px - b.x, dy = py - b.y;
+          const d2 = dx * dx + dy * dy;
+          const r2 = b.r * b.r;
+          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
         }
+        if (sum <= threshold) continue;
 
-        // interpolate radius at this point along the spine
-        const localR = spineRadii[closestSeg] * (1 - closestSegT)
-                     + spineRadii[Math.min(closestSeg + 1, spineRadii.length - 1)] * closestSegT;
-        const localPs = manualScale ? ps : localR;
-        const localMaxPerturb = localPs * amp;
-
-        const perpAngle = Math.atan2(py - closestCy, px - closestCx);
-
-        const nv1 = nA.get(
-          closestT * freq1 * 4 + Math.cos(perpAngle) * freq1,
-          Math.sin(perpAngle) * freq1
-        );
-        const nv2 = nB.get(
-          closestT * freq2 * 4 + Math.cos(perpAngle) * freq2,
-          Math.sin(perpAngle) * freq2
-        );
-        const noise = nv1 * 0.65 + nv2 * 0.35;
-        const perturb = localMaxPerturb * noise;
-
-        const pr = localR + perturb;
-        if (minDist > pr) continue;
-
-        const softEdge = pr * (1 - this.hardness);
-        let alpha = minDist <= softEdge ? 1 : 1 - (minDist - softEdge) / (pr - softEdge + 0.001);
-        alpha = Math.max(0, Math.min(1, alpha)) * op;
+        let alpha;
+        if (softBand <= 0) {
+          alpha = op;
+        } else {
+          alpha = Math.min(1, (sum - threshold) / softBand) * op;
+        }
+        if (alpha <= 0) continue;
 
         const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - alpha) + rc * alpha);
-        data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + gc * alpha);
-        data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bc * alpha);
+        const inv = 1 - alpha;
+        data[i]     = (data[i]     * inv + rc * alpha) | 0;
+        data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
+        data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
       }
     }
 
