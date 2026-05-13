@@ -704,7 +704,7 @@ function setupBlendPanel() {
               ? av - (1 - 2 * bv) * av * (1 - av)
               : av + (2 * bv - 1) * (Math.sqrt(av) - av);
             break;
-          default: result = av; // normal
+          default: result = bv; // normal: top layer at mix opacity
         }
 
         // lerp between A and blended result by mix amount
