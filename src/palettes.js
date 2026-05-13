@@ -51,46 +51,60 @@ export function lerpColor(a, b, t) {
   ];
 }
 
+// palettes are stored dark-to-light. `bgIdx` is the recommended background
+// color index for shape-on-bg generators (metaball, brushstroke). most real
+// camo backgrounds are mid-luminance (olive, khaki, sand), not the darkest
+// shadow color in the palette. defaults to 0 when not specified.
 export const PALETTES = {
   woodland: {
     label: 'Woodland M81',
     colors: ['1a2010', '2d4a1e', '4a6741', '8b6914', 'c4a35a'],
+    bgIdx: 2,
   },
   desert: {
     label: 'Desert 3-Color',
     colors: ['5c3d1e', '8b6330', 'c8b06e', 'd4c08a', 'e8d8b0'],
+    bgIdx: 3,
   },
   marpat_w: {
     label: 'MARPAT Woodland',
     colors: ['1a2610', '2e4820', '4a6835', '7a6040', 'b0a070'],
+    bgIdx: 2,
   },
   marpat_d: {
     label: 'MARPAT Desert',
     colors: ['5c4020', '8c6c3c', 'c8a060', 'd8bc88', 'ece0c0'],
+    bgIdx: 3,
   },
   multicam: {
     label: 'Multicam',
     colors: ['2d3818', '4a5028', '6b6840', '9c8550', 'c8b878'],
+    bgIdx: 2,
   },
   aor1: {
     label: 'AOR-1 Desert',
     colors: ['4a3018', '7a5c30', 'c09060', 'd8b880', 'e8d0a8'],
+    bgIdx: 3,
   },
   aor2: {
     label: 'AOR-2 Woodland',
     colors: ['141e0c', '283818', '3c5428', '607840', '9cb870'],
+    bgIdx: 2,
   },
   tigerstripe: {
     label: 'Tiger Stripe',
     colors: ['0c1408', '1e3010', '384820', '7a6830', 'c8b860'],
+    bgIdx: 4,
   },
   flecktarn: {
     label: 'Flecktarn',
     colors: ['1c2010', '344030', '486040', '8c8050', 'c8c098'],
+    bgIdx: 2,
   },
   amoeba: {
     label: 'Soviet Amoeba',
     colors: ['101810', '284028', '507848', '8c7840', 'c8b868'],
+    bgIdx: 2,
   },
   urban: {
     label: 'Urban / Ghost',
@@ -132,76 +146,94 @@ export const PALETTES = {
   dpm: {
     label: 'DPM (UK)',
     colors: ['1c2410', '2e4418', '4a3018', '7c6030', 'c8a058'],
+    bgIdx: 1,
   },
   frogskin: {
     label: 'Frogskin (USMC WWII)',
     colors: ['1e2810', '3e5828', '5c7838', '8c7840', 'd0b868'],
+    bgIdx: 2,
   },
   desert6: {
     label: '6-Color Desert (DBDU)',
     colors: ['1a1208', '4c3820', '785838', '9c8458', 'c8a060'],
+    bgIdx: 4,
   },
   strichtarn: {
     label: 'Strichtarn (DDR)',
     colors: ['1c2010', '2e3c20', '444c38', '606848', '808870'],
+    bgIdx: 2,
   },
   telo: {
     label: 'Telo Mimetico',
     colors: ['2a1c10', '4a3820', '687048', '989068', 'c0b088'],
+    bgIdx: 4,
   },
   splinter: {
     label: 'Splittertarn',
     colors: ['1c1c10', '384020', '607040', '886830', 'b89858'],
+    bgIdx: 2,
   },
   denison: {
     label: 'Denison Smock',
     colors: ['1c2410', '3c5020', '6c5830', 'a08040', 'd0b860'],
+    bgIdx: 2,
   },
   lizard: {
     label: 'Lizard / TAP 47',
     colors: ['141808', '2a3818', '485428', '706830', 'a89858'],
+    bgIdx: 2,
   },
 
   // ---- biome palettes ----
   biome_temperate: {
     label: 'Temperate Forest',
     colors: ['2a1e14', '2d4420', '4a6830', '7a5c30', 'b89850'],
+    bgIdx: 2,
   },
   biome_boreal: {
     label: 'Boreal / Conifer',
     colors: ['142010', '243820', '4a3c28', '6e7060', '889068'],
+    bgIdx: 2,
   },
   biome_tropical: {
     label: 'Tropical Jungle',
     colors: ['0c180a', '1e3810', '2d5a1c', '3c8020', '7aa848'],
+    bgIdx: 2,
   },
   biome_arid: {
     label: 'Arid Desert',
     colors: ['4a3018', '7a5c30', 'c09858', 'd8b878', 'e8d8b0'],
+    bgIdx: 3,
   },
   biome_semiarid: {
     label: 'Semi-Arid Scrub',
     colors: ['302818', '505028', '888048', 'a89860', 'c8b880'],
+    bgIdx: 3,
   },
   biome_arctic: {
     label: 'Arctic / Snow',
     colors: ['8898a8', 'b0bcc8', 'd0d8e0', 'e8ecf0', 'f4f4f8'],
+    bgIdx: 4,
   },
   biome_urban: {
     label: 'Urban Concrete',
     colors: ['282828', '505050', '787878', '989088', 'b8b0a8'],
+    bgIdx: 2,
   },
   biome_coastal: {
     label: 'Coastal / Maritime',
     colors: ['1e2838', '3c4848', '607070', '908870', 'c0b090'],
+    bgIdx: 2,
   },
   biome_savanna: {
     label: 'Savanna / Grassland',
     colors: ['302010', '505020', '908030', 'b8a040', 'd8c860'],
+    bgIdx: 3,
   },
   biome_marsh: {
     label: 'Wetland / Marsh',
     colors: ['181408', '303018', '485828', '707040', '989860'],
+    bgIdx: 2,
   },
 
   custom: {
@@ -213,6 +245,12 @@ export const PALETTES = {
 // return a mutable copy of the palette color array as hex strings (no #)
 export function getPaletteColors(key) {
   return [...(PALETTES[key]?.colors ?? PALETTES.woodland.colors)].map(c => c.replace('#', ''));
+}
+
+// recommended background index for shape-on-bg generators. presets can still
+// override via their own `mb-bg`/`brush-bg` param values.
+export function getPaletteBgIdx(key) {
+  return PALETTES[key]?.bgIdx ?? 0;
 }
 
 // biome configs for random palette generation
