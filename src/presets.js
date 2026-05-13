@@ -14,29 +14,34 @@ export const PATTERN_PRESETS = {
   },
   dpm: {
     label: 'DPM (UK)',
-    generator: 'contour',
+    generator: 'brushstroke',
     palette: 'dpm',
     params: {
-      'ct-scale': 2.0, 'ct-stretch': 1.8, 'ct-warp': 1.0,
-      'ct-sharpness': 0.88, 'ct-coverage': 0.50, 'ct-puzzle': 1,
+      'brush-layers': 3, 'brush-strokes': 18,
+      'brush-length': 0.32, 'brush-thick': 0.034,
+      'brush-curve': 0.50, 'brush-angle': 90, 'brush-anglevar': 30,
+      'brush-thresh': 1.3, 'brush-bg': 1,
     },
   },
   tiger_stripe: {
     label: 'Tiger Stripe',
-    generator: 'stripe',
+    generator: 'brushstroke',
     palette: 'tigerstripe',
     params: {
-      'stripe-freq': 5.5, 'stripe-flow': 0.8, 'stripe-angle': 78,
-      'stripe-edge': 0.45, 'stripe-contrast': 0.5,
+      'brush-layers': 3, 'brush-strokes': 14,
+      'brush-length': 0.65, 'brush-thick': 0.038,
+      'brush-curve': 0.20, 'brush-angle': 0, 'brush-anglevar': 12,
+      'brush-thresh': 1.3, 'brush-bg': 4,
     },
   },
   duckhunter: {
     label: 'Duck Hunter / Frogskin',
-    generator: 'contour',
+    generator: 'metaball',
     palette: 'frogskin',
     params: {
-      'ct-scale': 3.5, 'ct-stretch': 1.2, 'ct-warp': 0.6,
-      'ct-sharpness': 0.92, 'ct-coverage': 0.55, 'ct-puzzle': 1,
+      'mb-clusters': 12, 'mb-core': 0.10, 'mb-satellites': 5,
+      'mb-spread': 1.10, 'mb-sat-size': 0.70,
+      'mb-threshold': 1.7, 'mb-bg': 2, 'gen-softness': 0,
     },
   },
   denison: {
@@ -73,11 +78,12 @@ export const PATTERN_PRESETS = {
   },
   multicam: {
     label: 'Multicam',
-    generator: 'contour',
+    generator: 'metaball',
     palette: 'multicam',
     params: {
-      'ct-scale': 2.2, 'ct-stretch': 1.8, 'ct-warp': 1.5,
-      'ct-sharpness': 0.50, 'ct-coverage': 0.55, 'ct-puzzle': 1,
+      'mb-clusters': 15, 'mb-core': 0.09, 'mb-satellites': 5,
+      'mb-spread': 1.1, 'mb-sat-size': 0.65,
+      'mb-threshold': 1.5, 'mb-bg': 2, 'gen-softness': 0,
     },
   },
   flecktarn_preset: {
@@ -93,18 +99,19 @@ export const PATTERN_PRESETS = {
   // ---- historical ----
   telo_mimetico: {
     label: 'Telo Mimetico',
-    generator: 'contour',
+    generator: 'metaball',
     palette: 'telo',
     params: {
-      'ct-scale': 1.4, 'ct-stretch': 1.5, 'ct-warp': 0.5,
-      'ct-sharpness': 0.92, 'ct-coverage': 0.55, 'ct-puzzle': 1,
+      'mb-clusters': 16, 'mb-core': 0.09, 'mb-satellites': 3,
+      'mb-spread': 0.75, 'mb-sat-size': 0.55,
+      'mb-threshold': 1.6, 'mb-bg': 4, 'gen-softness': 0,
     },
   },
   splinter: {
     label: 'Splittertarn',
     generator: 'geometric',
     palette: 'splinter',
-    params: { 'geo-cells': 25, 'geo-angular': 0.70, 'gen-scale': 1.2 },
+    params: { 'geo-cells': 30, 'geo-angular': 0.95, 'gen-scale': 1.0 },
   },
   strichtarn: {
     label: 'Strichtarn (Rain)',
@@ -122,7 +129,7 @@ export const PATTERN_PRESETS = {
     params: {
       'mb-clusters': 8, 'mb-core': 0.13, 'mb-satellites': 6,
       'mb-spread': 1.15, 'mb-sat-size': 0.65,
-      'mb-threshold': 1.6, 'gen-softness': 0,
+      'mb-threshold': 1.6, 'mb-bg': 2, 'gen-softness': 0,
     },
   },
   chocolate_chip: {
@@ -140,9 +147,10 @@ export const PATTERN_PRESETS = {
     generator: 'brushstroke',
     palette: 'bajablast',
     params: {
-      'brush-layers': 5, 'brush-blobs': 10,
-      'brush-min': 0.08, 'brush-max': 0.30,
-      'gen-softness': 0.35, 'brush-jitter': 0.55, 'brush-elong': 0.50,
+      'brush-layers': 4, 'brush-strokes': 14,
+      'brush-length': 0.40, 'brush-thick': 0.055,
+      'brush-curve': 0.65, 'brush-angle': 45, 'brush-anglevar': 60,
+      'brush-thresh': 1.2, 'brush-bg': 0,
     },
   },
   volcano: {

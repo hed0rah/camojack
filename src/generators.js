@@ -365,29 +365,35 @@ export function generateMetaball(ctx, size, palette, opts = {}) {
     satSize      = 0.65,
     threshold    = 1.5,
     softness     = 0,
+    bgIdx        = 0,
     seed         = 0,
   } = opts;
 
   const rng = seededRng(seed);
   const colors = rgbs(palette);
+  const nc = colors.length;
   const imageData = ctx.createImageData(size, size);
   const { data } = imageData;
-  fillBg(data, size, colors[0]);
+  const safeBg = Math.max(0, Math.min(nc - 1, bgIdx));
+  fillBg(data, size, colors[safeBg]);
 
-  if (colors.length < 2 || clusterCount < 1) {
+  if (nc < 2 || clusterCount < 1) {
     ctx.putImageData(imageData, 0, 0);
     return;
   }
+
+  // build the list of palette indices a blob can take (everything except bg)
+  const blobIdxPool = [];
+  for (let i = 0; i < nc; i++) if (i !== safeBg) blobIdxPool.push(i);
 
   // poisson-disk cluster centers for even distribution across the tile
   const centers = poisson(clusterCount, size, rng);
 
   // build each cluster: 1 core + N satellites, all with toroidal copies pre-expanded.
-  // colIdx in [1, nc-1] -- background (0) stays for non-blob pixels
   const clusterList = [];
   for (let c = 0; c < centers.length; c++) {
     const [cx, cy] = centers[c];
-    const colIdx = 1 + Math.floor(rng() * (colors.length - 1));
+    const colIdx = blobIdxPool[Math.floor(rng() * blobIdxPool.length)];
     const coreR = coreRadius * size * (0.7 + rng() * 0.6);
 
     const localBlobs = [{ x: cx, y: cy, r: coreR }];
@@ -569,17 +575,23 @@ export function generateStripe(ctx, size, palette, opts = {}) {
   ctx.putImageData(imageData, 0, 0);
 }
 
-// ---- Brushstroke (Woodland / DPM style layered elongated blobs) ----
+// ---- Brushstroke (DPM Woodland style elongated drips) ----
+// each stroke is a chain of metaballs along a quadratic Bezier curve.
+// the chain smoothly tapers thicker in the middle and thinner at ends,
+// producing the signature curving drip shapes of DPM Woodland / Desert.
+// painted in dark-to-light luminance order so darker shapes sit on top.
 
 export function generateBrushstroke(ctx, size, palette, opts = {}) {
   const {
-    layers     = 4,
-    blobsPer   = 7,
-    sizeMin    = 0.10,
-    sizeMax    = 0.28,
-    softness   = 0,
-    jitter     = 0.50,
-    elongation = 0.40,
+    layers     = 3,         // number of color layers painted over bg
+    strokes    = 8,         // strokes per layer
+    length     = 0.45,      // stroke length as fraction of tile size
+    thickness  = 0.06,      // base metaball radius as fraction of tile size
+    curvature  = 0.25,      // perpendicular control-point offset (fraction of length)
+    angle      = 90,        // base angle in degrees (90 = vertical, DPM default)
+    angleVar   = 30,        // jitter on base angle in degrees
+    threshold  = 1.0,
+    bgIdx      = 0,
     seed       = 0,
   } = opts;
 
@@ -589,53 +601,115 @@ export function generateBrushstroke(ctx, size, palette, opts = {}) {
 
   const imageData = ctx.createImageData(size, size);
   const { data } = imageData;
-  fillBg(data, size, colors[0]);
+  const safeBg = Math.max(0, Math.min(nc - 1, bgIdx));
+  fillBg(data, size, colors[safeBg]);
 
-  for (let L = 1; L < nc && L <= layers; L++) {
-    const col = colors[L % nc];
-    const n = createNoise(seed + L * 111);
-    const count = blobsPer + Math.round((rng() - 0.5) * 4);
+  if (nc < 2) {
+    ctx.putImageData(imageData, 0, 0);
+    return;
+  }
 
-    for (let b = 0; b < count; b++) {
+  // colors to paint, sorted brightest -> darkest so darkest paints last (on top)
+  const paintIdx = [];
+  for (let i = 0; i < nc; i++) if (i !== safeBg) paintIdx.push(i);
+  paintIdx.sort((a, b) => {
+    const la = colors[a][0]*0.3 + colors[a][1]*0.59 + colors[a][2]*0.11;
+    const lb = colors[b][0]*0.3 + colors[b][1]*0.59 + colors[b][2]*0.11;
+    return lb - la;
+  });
+
+  const strokeLen = length * size;
+  const blobR = thickness * size;
+  // wider spacing keeps the per-blob bumps visible along the stroke;
+  // tight spacing collapses everything into a smooth oval.
+  const blobsPerStroke = Math.max(3, Math.ceil(strokeLen / (blobR * 1.1)));
+  const baseAng = angle * Math.PI / 180;
+  const layerCount = Math.min(layers, paintIdx.length);
+
+  for (let L = 0; L < layerCount; L++) {
+    const col = colors[paintIdx[L]];
+
+    for (let s = 0; s < strokes; s++) {
       const cx = rng() * size;
       const cy = rng() * size;
-      const r  = (sizeMin + rng() * (sizeMax - sizeMin)) * size;
-      const bAngle  = rng() * Math.PI * 2;
-      const stretch = 1 + elongation * (1 + rng());
-      const R = r * stretch;
+      const ang = baseAng + (rng() - 0.5) * (angleVar * Math.PI / 180) * 2;
+      const cosA = Math.cos(ang), sinA = Math.sin(ang);
 
-      for (const [ox, oy] of toroidalOffsets(cx, cy, R * 1.5, size)) {
-        const bcx = cx + ox, bcy = cy + oy;
-        const x0 = Math.max(0, Math.ceil(bcx - R * 1.5));
-        const x1 = Math.min(size - 1, Math.floor(bcx + R * 1.5));
-        const y0 = Math.max(0, Math.ceil(bcy - R * 1.5));
-        const y1 = Math.min(size - 1, Math.floor(bcy + R * 1.5));
+      // endpoints
+      const halfL = strokeLen / 2;
+      const x0 = cx - cosA * halfL;
+      const y0 = cy - sinA * halfL;
+      const x2 = cx + cosA * halfL;
+      const y2 = cy + sinA * halfL;
 
-        const cosB = Math.cos(bAngle), sinB = Math.sin(bAngle);
+      // control point = midpoint + perpendicular offset
+      const perpOff = (rng() - 0.5) * curvature * strokeLen * 2;
+      const x1 = cx + (-sinA) * perpOff;
+      const y1 = cy + ( cosA) * perpOff;
 
-        for (let py = y0; py <= y1; py++) {
-          for (let px = x0; px <= x1; px++) {
-            const dx = px - bcx, dy = py - bcy;
-            const lx = dx * cosB + dy * sinB;
-            const ly = -dx * sinB + dy * cosB;
-            const dist  = Math.sqrt((lx / stretch) ** 2 + ly * ly);
-            const angle = Math.atan2(ly, lx / stretch);
+      // place metaballs along the Bezier curve.
+      // taper softly so ends are thinner than middle (drip shape)
+      // PLUS per-blob radius jitter so the stroke has bumpy character
+      // (smooth-tapered ovals don't look like real DPM drips).
+      // perpendicular wander adds organic wobble to the spine.
+      const localBlobs = [];
+      const strokeScale = 0.85 + rng() * 0.3;
+      for (let k = 0; k < blobsPerStroke; k++) {
+        const t = blobsPerStroke === 1 ? 0.5 : k / (blobsPerStroke - 1);
+        const it = 1 - t;
+        let bx = it*it*x0 + 2*t*it*x1 + t*t*x2;
+        let by = it*it*y0 + 2*t*it*y1 + t*t*y2;
+        // perpendicular wander -- random offset perpendicular to local tangent
+        // (use overall stroke angle as approximation -- good enough)
+        const wander = (rng() - 0.5) * blobR * 0.4;
+        bx += (-sinA) * wander;
+        by += ( cosA) * wander;
+        const taper = 0.45 + Math.sin(t * Math.PI) * 0.55;
+        const blobJitter = 0.65 + rng() * 0.7;
+        const r = blobR * taper * blobJitter * strokeScale;
+        localBlobs.push({ x: bx, y: by, r });
+      }
 
-            const pertR = r * (1 + jitter * n.get(
-              Math.cos(angle) * 1.5 + b * 0.3 + L * 0.2,
-              Math.sin(angle) * 1.5 + b * 0.3 + L * 0.2
-            ));
+      // toroidal expansion for tiling
+      const wrapped = [];
+      for (const b of localBlobs) {
+        const reach = b.r * 3;
+        for (const [ox, oy] of toroidalOffsets(b.x, b.y, reach, size)) {
+          wrapped.push({ x: b.x + ox, y: b.y + oy, r: b.r });
+        }
+      }
 
-            if (dist > pertR) continue;
+      // AABB
+      let ax0 = size, ay0 = size, ax1 = 0, ay1 = 0;
+      for (const b of wrapped) {
+        const reach = b.r * 3;
+        if (b.x - reach < ax0) ax0 = b.x - reach;
+        if (b.y - reach < ay0) ay0 = b.y - reach;
+        if (b.x + reach > ax1) ax1 = b.x + reach;
+        if (b.y + reach > ay1) ay1 = b.y + reach;
+      }
+      const xLo = Math.max(0, Math.floor(ax0));
+      const yLo = Math.max(0, Math.floor(ay0));
+      const xHi = Math.min(size - 1, Math.ceil(ax1));
+      const yHi = Math.min(size - 1, Math.ceil(ay1));
 
-            const softEdge = pertR * (1 - softness);
-            let alpha = dist <= softEdge ? 1 : 1 - (dist - softEdge) / (pertR - softEdge + 0.001);
-            alpha = Math.max(0, Math.min(1, alpha));
-
-            const i = (py * size + px) * 4;
-            data[i]     = Math.round(data[i]     * (1 - alpha) + col[0] * alpha);
-            data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + col[1] * alpha);
-            data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + col[2] * alpha);
+      // paint pixels where the cluster's field exceeds threshold
+      for (let py = yLo; py <= yHi; py++) {
+        const rowBase = py * size;
+        for (let px = xLo; px <= xHi; px++) {
+          let sum = 0;
+          for (let k = 0; k < wrapped.length; k++) {
+            const b = wrapped[k];
+            const dx = px - b.x, dy = py - b.y;
+            const d2 = dx*dx + dy*dy;
+            const r2 = b.r * b.r;
+            if (d2 < r2 * 9) sum += r2 / (r2 + d2);
+          }
+          if (sum > threshold) {
+            const idx = (rowBase + px) * 4;
+            data[idx]     = col[0];
+            data[idx + 1] = col[1];
+            data[idx + 2] = col[2];
           }
         }
       }
