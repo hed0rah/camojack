@@ -14,11 +14,13 @@ export const PATTERN_PRESETS = {
   },
   dpm: {
     label: 'DPM (UK)',
-    generator: 'contour',
+    generator: 'brushstroke',
     palette: 'dpm',
     params: {
-      'ct-scale': 2.0, 'ct-stretch': 1.8, 'ct-warp': 1.0,
-      'ct-sharpness': 0.88, 'ct-coverage': 0.50, 'ct-puzzle': 1,
+      'brush-layers': 3, 'brush-strokes': 18,
+      'brush-length': 0.32, 'brush-thick': 0.034,
+      'brush-curve': 0.50, 'brush-angle': 90, 'brush-anglevar': 30,
+      'brush-thresh': 1.3, 'brush-bg': 1,
     },
   },
   tiger_stripe: {
@@ -32,11 +34,12 @@ export const PATTERN_PRESETS = {
   },
   duckhunter: {
     label: 'Duck Hunter / Frogskin',
-    generator: 'contour',
+    generator: 'metaball',
     palette: 'frogskin',
     params: {
-      'ct-scale': 3.5, 'ct-stretch': 1.2, 'ct-warp': 0.6,
-      'ct-sharpness': 0.92, 'ct-coverage': 0.55, 'ct-puzzle': 1,
+      'mb-clusters': 12, 'mb-core': 0.10, 'mb-satellites': 5,
+      'mb-spread': 1.10, 'mb-sat-size': 0.70,
+      'mb-threshold': 1.7, 'mb-bg': 2, 'gen-softness': 0,
     },
   },
   denison: {
@@ -140,9 +143,10 @@ export const PATTERN_PRESETS = {
     generator: 'brushstroke',
     palette: 'bajablast',
     params: {
-      'brush-layers': 5, 'brush-blobs': 10,
-      'brush-min': 0.08, 'brush-max': 0.30,
-      'gen-softness': 0.35, 'brush-jitter': 0.55, 'brush-elong': 0.50,
+      'brush-layers': 4, 'brush-strokes': 14,
+      'brush-length': 0.40, 'brush-thick': 0.055,
+      'brush-curve': 0.65, 'brush-angle': 45, 'brush-anglevar': 60,
+      'brush-thresh': 1.2, 'brush-bg': 0,
     },
   },
   volcano: {

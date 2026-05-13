@@ -196,13 +196,15 @@ const PARAM_DEFS = {
     { id: 'stripe-contrast',label:'Contrast', min: 0.05, max: 3,    value: 0.5, step: 0.05 },
   ],
   brushstroke: [
-    { id: 'brush-layers',  label: 'Layers',   min: 1,    max: 10,   value: 4,   step: 1    },
-    { id: 'brush-blobs',   label: 'Blobs',    min: 1,    max: 40,   value: 7,   step: 1    },
-    { id: 'brush-min',     label: 'Min Size', min: 0.01, max: 0.40, value: 0.10,step: 0.01 },
-    { id: 'brush-max',     label: 'Max Size', min: 0.02, max: 0.70, value: 0.28,step: 0.01 },
-    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0,   step: 0.05 },
-    { id: 'brush-jitter',  label: 'Jitter',   min: 0,    max: 1.5,  value: 0.50,step: 0.05 },
-    { id: 'brush-elong',   label: 'Elongation',min: 0,   max: 3,    value: 0.40,step: 0.05 },
+    { id: 'brush-layers',  label: 'Layers',   min: 1,    max: 5,    value: 3,   step: 1    },
+    { id: 'brush-strokes', label: 'Strokes',  min: 2,    max: 30,   value: 8,   step: 1    },
+    { id: 'brush-length',  label: 'Length',   min: 0.10, max: 1.0,  value: 0.45,step: 0.05 },
+    { id: 'brush-thick',   label: 'Thickness',min: 0.02, max: 0.20, value: 0.06,step: 0.01 },
+    { id: 'brush-curve',   label: 'Curvature',min: 0,    max: 1.0,  value: 0.25,step: 0.05 },
+    { id: 'brush-angle',   label: 'Angle',    min: 0,    max: 360,  value: 90,  step: 5    },
+    { id: 'brush-anglevar',label: 'AngleVar', min: 0,    max: 90,   value: 30,  step: 5    },
+    { id: 'brush-thresh',  label: 'Threshold',min: 0.3,  max: 3.0,  value: 1.0, step: 0.05 },
+    { id: 'brush-bg',      label: 'BG Index', min: 0,    max: 4,    value: 0,   step: 1    },
   ],
   fleck: [
     { id: 'fleck-clusters',label: 'Clusters', min: 2,    max: 150,  value: 40,  step: 1    },
@@ -400,7 +402,7 @@ function runGenerator() {
     case 'stripe':
       generateStripe(ctx, sz, pal, { stripeFreq: getParam('stripe-freq', 6.0), flowFreq: getParam('stripe-flow', 0.8), angle: getParam('stripe-angle', 78), edgeNoise: getParam('stripe-edge', 0.45), contrast: getParam('stripe-contrast', 0.5), tileable, seed }); break;
     case 'brushstroke':
-      generateBrushstroke(ctx, sz, pal, { layers: getParam('brush-layers', 4)|0, blobsPer: getParam('brush-blobs', 7)|0, sizeMin: getParam('brush-min', 0.10), sizeMax: getParam('brush-max', 0.28), softness: getParam('gen-softness', 0.30), jitter: getParam('brush-jitter', 0.50), elongation: getParam('brush-elong', 0.40), seed }); break;
+      generateBrushstroke(ctx, sz, pal, { layers: getParam('brush-layers', 3)|0, strokes: getParam('brush-strokes', 8)|0, length: getParam('brush-length', 0.45), thickness: getParam('brush-thick', 0.06), curvature: getParam('brush-curve', 0.25), angle: getParam('brush-angle', 90), angleVar: getParam('brush-anglevar', 30), threshold: getParam('brush-thresh', 1.0), bgIdx: getParam('brush-bg', 0)|0, seed }); break;
     case 'fleck':
       generateFleck(ctx, sz, pal, { clusters: getParam('fleck-clusters', 40)|0, dotsPerClust: getParam('fleck-dots', 25)|0, dotRadius: getParam('fleck-radius', 4)|0, spread: getParam('fleck-spread', 0.06), seed }); break;
     case 'rain':
