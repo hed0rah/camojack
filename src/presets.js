@@ -122,7 +122,7 @@ export const PATTERN_PRESETS = {
     params: {
       'mb-clusters': 8, 'mb-core': 0.13, 'mb-satellites': 6,
       'mb-spread': 1.15, 'mb-sat-size': 0.65,
-      'mb-threshold': 1.6, 'gen-softness': 0,
+      'mb-threshold': 1.6, 'mb-bg': 2, 'gen-softness': 0,
     },
   },
   chocolate_chip: {

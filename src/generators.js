@@ -365,29 +365,35 @@ export function generateMetaball(ctx, size, palette, opts = {}) {
     satSize      = 0.65,
     threshold    = 1.5,
     softness     = 0,
+    bgIdx        = 0,
     seed         = 0,
   } = opts;
 
   const rng = seededRng(seed);
   const colors = rgbs(palette);
+  const nc = colors.length;
   const imageData = ctx.createImageData(size, size);
   const { data } = imageData;
-  fillBg(data, size, colors[0]);
+  const safeBg = Math.max(0, Math.min(nc - 1, bgIdx));
+  fillBg(data, size, colors[safeBg]);
 
-  if (colors.length < 2 || clusterCount < 1) {
+  if (nc < 2 || clusterCount < 1) {
     ctx.putImageData(imageData, 0, 0);
     return;
   }
+
+  // build the list of palette indices a blob can take (everything except bg)
+  const blobIdxPool = [];
+  for (let i = 0; i < nc; i++) if (i !== safeBg) blobIdxPool.push(i);
 
   // poisson-disk cluster centers for even distribution across the tile
   const centers = poisson(clusterCount, size, rng);
 
   // build each cluster: 1 core + N satellites, all with toroidal copies pre-expanded.
-  // colIdx in [1, nc-1] -- background (0) stays for non-blob pixels
   const clusterList = [];
   for (let c = 0; c < centers.length; c++) {
     const [cx, cy] = centers[c];
-    const colIdx = 1 + Math.floor(rng() * (colors.length - 1));
+    const colIdx = blobIdxPool[Math.floor(rng() * blobIdxPool.length)];
     const coreR = coreRadius * size * (0.7 + rng() * 0.6);
 
     const localBlobs = [{ x: cx, y: cy, r: coreR }];
