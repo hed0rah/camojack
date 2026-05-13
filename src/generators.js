@@ -6,7 +6,7 @@ import { hexToRgb, lerpColor } from './palettes.js';
 
 // ---- helpers ----
 
-function poisson(count, size, rng, minDist) {
+export function poisson(count, size, rng, minDist) {
   // Poisson disk sampling with toroidal wrap
   const r = minDist ?? size / Math.sqrt(count * Math.PI * 0.5);
   const pts = [];
@@ -60,11 +60,11 @@ function bsample(data, w, h, x, y) {
   ];
 }
 
-function rgbs(palette) {
+export function rgbs(palette) {
   return palette.map(hexToRgb);
 }
 
-function paletteIdx(v, n) {
+export function paletteIdx(v, n) {
   // v in [0,1], returns palette index
   return Math.min(n - 1, Math.floor(v * n));
 }
@@ -75,8 +75,8 @@ export function generateVoronoi(ctx, size, palette, opts = {}) {
   const {
     seedCount = 12,
     scale     = 1.0,
-    softness  = 0.25,
-    border    = 0.35,
+    softness  = 0,
+    border    = 0,
     seed      = 0,
   } = opts;
 
@@ -263,7 +263,7 @@ export function generateBlotch(ctx, size, palette, opts = {}) {
     count    = 20,
     minSize  = 0.04,
     maxSize  = 0.18,
-    softness = 0.25,
+    softness = 0,
     blobNoise = 0.60,
     seed     = 0,
   } = opts;
@@ -349,9 +349,148 @@ export function generateBlotch(ctx, size, palette, opts = {}) {
   ctx.putImageData(imageData, 0, 0);
 }
 
+// ---- Metaball (smooth lobed blobs -- amoeba, frogskin, duck hunter) ----
+// each "cluster" is a core blob + several satellite blobs around it.
+// per-pixel field = sum of r^2 / (d^2 + 1) for all blobs in a cluster.
+// where field > threshold, paint the dominant cluster's color.
+// this is the right math for camo amoeba shapes; angular noise (used by blotch)
+// is the wrong tool and produces spiky tentacles.
+
+export function generateMetaball(ctx, size, palette, opts = {}) {
+  const {
+    clusters: clusterCount = 18,
+    coreRadius   = 0.08,
+    satellites   = 5,
+    spread       = 0.9,
+    satSize      = 0.65,
+    threshold    = 1.5,
+    softness     = 0,
+    seed         = 0,
+  } = opts;
+
+  const rng = seededRng(seed);
+  const colors = rgbs(palette);
+  const imageData = ctx.createImageData(size, size);
+  const { data } = imageData;
+  fillBg(data, size, colors[0]);
+
+  if (colors.length < 2 || clusterCount < 1) {
+    ctx.putImageData(imageData, 0, 0);
+    return;
+  }
+
+  // poisson-disk cluster centers for even distribution across the tile
+  const centers = poisson(clusterCount, size, rng);
+
+  // build each cluster: 1 core + N satellites, all with toroidal copies pre-expanded.
+  // colIdx in [1, nc-1] -- background (0) stays for non-blob pixels
+  const clusterList = [];
+  for (let c = 0; c < centers.length; c++) {
+    const [cx, cy] = centers[c];
+    const colIdx = 1 + Math.floor(rng() * (colors.length - 1));
+    const coreR = coreRadius * size * (0.7 + rng() * 0.6);
+
+    const localBlobs = [{ x: cx, y: cy, r: coreR }];
+    for (let i = 0; i < satellites; i++) {
+      const angle = (i / satellites) * Math.PI * 2 + (rng() - 0.5) * 0.7;
+      const d = coreR * spread * (0.8 + rng() * 0.5);
+      localBlobs.push({
+        x: cx + Math.cos(angle) * d,
+        y: cy + Math.sin(angle) * d,
+        r: coreR * satSize * (0.7 + rng() * 0.6),
+      });
+    }
+
+    // expand each blob into its toroidal copies (so blobs near a tile edge
+    // contribute to the opposite edge for seamless tiling)
+    const wrapped = [];
+    for (const b of localBlobs) {
+      const reach = b.r * 3;
+      for (const [ox, oy] of toroidalOffsets(b.x, b.y, reach, size)) {
+        wrapped.push({ x: b.x + ox, y: b.y + oy, r: b.r });
+      }
+    }
+
+    clusterList.push({ wrapped, colIdx });
+  }
+
+  // accumulate per-pixel field-max + winning cluster index.
+  // Int16Array works for up to 32767 clusters -- plenty.
+  const fieldMax = new Float32Array(size * size);
+  const winner   = new Int16Array(size * size).fill(-1);
+
+  for (let c = 0; c < clusterList.length; c++) {
+    const { wrapped } = clusterList[c];
+
+    // AABB of this cluster's influence
+    let ax0 = size, ay0 = size, ax1 = 0, ay1 = 0;
+    for (const b of wrapped) {
+      const reach = b.r * 3;
+      if (b.x - reach < ax0) ax0 = b.x - reach;
+      if (b.y - reach < ay0) ay0 = b.y - reach;
+      if (b.x + reach > ax1) ax1 = b.x + reach;
+      if (b.y + reach > ay1) ay1 = b.y + reach;
+    }
+    const x0 = Math.max(0, Math.floor(ax0));
+    const y0 = Math.max(0, Math.floor(ay0));
+    const x1 = Math.min(size - 1, Math.ceil(ax1));
+    const y1 = Math.min(size - 1, Math.ceil(ay1));
+
+    for (let py = y0; py <= y1; py++) {
+      const rowBase = py * size;
+      for (let px = x0; px <= x1; px++) {
+        let sum = 0;
+        for (let k = 0; k < wrapped.length; k++) {
+          const b = wrapped[k];
+          const dx = px - b.x, dy = py - b.y;
+          const d2 = dx * dx + dy * dy;
+          const r2 = b.r * b.r;
+          // dimensionless field: 1 at blob center, 0.5 at radius r, 0.2 at 2r
+          // (limit influence to ~3r for perf)
+          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
+        }
+        if (sum > 0) {
+          const i = rowBase + px;
+          if (sum > fieldMax[i]) {
+            fieldMax[i] = sum;
+            winner[i] = c;
+          }
+        }
+      }
+    }
+  }
+
+  // resolve: paint pixels whose field exceeds threshold
+  const softBand = softness > 0 ? threshold * softness : 0;
+  for (let i = 0; i < size * size; i++) {
+    if (fieldMax[i] <= threshold) continue;
+    const w = winner[i];
+    if (w < 0) continue;
+    const col = colors[clusterList[w].colIdx];
+
+    let alpha = 1;
+    if (softBand > 0) {
+      alpha = Math.min(1, (fieldMax[i] - threshold) / softBand);
+    }
+
+    const idx = i * 4;
+    if (alpha >= 1) {
+      data[idx]     = col[0];
+      data[idx + 1] = col[1];
+      data[idx + 2] = col[2];
+    } else {
+      data[idx]     = Math.round(data[idx]     * (1 - alpha) + col[0] * alpha);
+      data[idx + 1] = Math.round(data[idx + 1] * (1 - alpha) + col[1] * alpha);
+      data[idx + 2] = Math.round(data[idx + 2] * (1 - alpha) + col[2] * alpha);
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+}
+
 // ---- shared helper: toroidal edge offsets ----
 
-function toroidalOffsets(cx, cy, r, size) {
+export function toroidalOffsets(cx, cy, r, size) {
   const off = [[0, 0]];
   if (cx - r < 0)    off.push([ size, 0]);
   if (cx + r > size) off.push([-size, 0]);
@@ -364,7 +503,7 @@ function toroidalOffsets(cx, cy, r, size) {
   return off;
 }
 
-function fillBg(data, size, color) {
+export function fillBg(data, size, color) {
   for (let i = 0; i < size * size; i++) {
     data[i * 4] = color[0]; data[i * 4 + 1] = color[1];
     data[i * 4 + 2] = color[2]; data[i * 4 + 3] = 255;
@@ -438,7 +577,7 @@ export function generateBrushstroke(ctx, size, palette, opts = {}) {
     blobsPer   = 7,
     sizeMin    = 0.10,
     sizeMax    = 0.28,
-    softness   = 0.30,
+    softness   = 0,
     jitter     = 0.50,
     elongation = 0.40,
     seed       = 0,
@@ -625,105 +764,178 @@ export function generateChip(ctx, size, palette, opts = {}) {
     blobMax    = 0.16,
     chipCount  = 180,
     chipSize   = 5,
-    softness   = 0.20,
-    shadow     = 0.4,
+    softness   = 0,
+    shadow     = 0.25,
     seed       = 0,
   } = opts;
 
   const rng = seededRng(seed);
-  const n   = createNoise(seed + 20);
   const colors = rgbs(palette);
   const nc = colors.length;
 
   const imageData = ctx.createImageData(size, size);
   const { data } = imageData;
-  fillBg(data, size, colors[0]);
 
-  // consistent light direction for shadows
-  const lightAngle = 2.3; // roughly upper-left
+  // chocolate chip semantics differ from most generators:
+  // background is the LIGHTEST color (sand/khaki), chips are the DARKEST
+  // (rocks/pebbles), big blobs are middle browns. Palette is dark->light
+  // by convention, so map accordingly.
+  const bgIdx   = nc - 1;
+  const chipIdx = 0;
+  fillBg(data, size, colors[bgIdx]);
+
+  // consistent light direction for shadows (upper-left)
+  const lightAngle = 2.3;
   const shadowDx = Math.cos(lightAngle);
   const shadowDy = Math.sin(lightAngle);
 
-  const midColors = Math.max(1, nc - 1);
+  // ---- BIG BLOBS underneath ----
+  // each blob = a tiny metaball cluster (1 core + 1-3 small satellites)
+  // produces smooth rounded splotches instead of the angular-noise stars
+  // that this generator used to produce.
+  // pick from middle indices so we don't reuse bg or chip color
+  const midLo = 1, midHi = Math.max(midLo, nc - 2);
+  const blobClusters = [];
   for (let b = 0; b < blobCount; b++) {
     const cx = rng() * size;
     const cy = rng() * size;
     const r  = (blobMin + rng() * (blobMax - blobMin)) * size;
-    const colIdx = 1 + Math.floor(rng() * Math.min(midColors, nc - 1));
-    const col = colors[Math.min(colIdx, nc - 1)];
+    const colIdx = midLo + Math.floor(rng() * (midHi - midLo + 1));
 
-    for (const [ox, oy] of toroidalOffsets(cx, cy, r * 1.5, size)) {
-      const bcx = cx + ox, bcy = cy + oy;
-      const x0 = Math.max(0, Math.ceil(bcx - r * 1.5));
-      const x1 = Math.min(size - 1, Math.floor(bcx + r * 1.5));
-      const y0 = Math.max(0, Math.ceil(bcy - r * 1.5));
-      const y1 = Math.min(size - 1, Math.floor(bcy + r * 1.5));
+    const localBlobs = [{ x: cx, y: cy, r }];
+    const nSat = 1 + Math.floor(rng() * 3);
+    for (let i = 0; i < nSat; i++) {
+      const angle = rng() * Math.PI * 2;
+      const d = r * (0.4 + rng() * 0.5);
+      localBlobs.push({
+        x: cx + Math.cos(angle) * d,
+        y: cy + Math.sin(angle) * d,
+        r: r * (0.4 + rng() * 0.4),
+      });
+    }
 
-      for (let py = y0; py <= y1; py++) {
-        for (let px = x0; px <= x1; px++) {
-          const ddx = px - bcx, ddy = py - bcy;
-          const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-          const angle = Math.atan2(ddy, ddx);
-          const pertR = r * (1 + 0.4 * n.get(
-            Math.cos(angle) * 1.5 + b * 0.3,
-            Math.sin(angle) * 1.5 + b * 0.3
-          ));
-          if (dist > pertR) continue;
-          const softEdge = pertR * (1 - softness);
-          let alpha = dist <= softEdge ? 1 : 1 - (dist - softEdge) / (pertR - softEdge + 0.001);
-          alpha = Math.max(0, Math.min(1, alpha));
-          const i = (py * size + px) * 4;
-          data[i]     = Math.round(data[i]     * (1 - alpha) + col[0] * alpha);
-          data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + col[1] * alpha);
-          data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + col[2] * alpha);
+    // toroidal expansion for seamless tiling
+    const wrapped = [];
+    for (const wb of localBlobs) {
+      const reach = wb.r * 3;
+      for (const [ox, oy] of toroidalOffsets(wb.x, wb.y, reach, size)) {
+        wrapped.push({ x: wb.x + ox, y: wb.y + oy, r: wb.r });
+      }
+    }
+    blobClusters.push({ wrapped, colIdx });
+  }
+
+  // metaball field accumulation -- track winning cluster per pixel
+  const fieldMax = new Float32Array(size * size);
+  const winner   = new Int16Array(size * size).fill(-1);
+
+  for (let c = 0; c < blobClusters.length; c++) {
+    const { wrapped } = blobClusters[c];
+    let ax0 = size, ay0 = size, ax1 = 0, ay1 = 0;
+    for (const wb of wrapped) {
+      const reach = wb.r * 3;
+      if (wb.x - reach < ax0) ax0 = wb.x - reach;
+      if (wb.y - reach < ay0) ay0 = wb.y - reach;
+      if (wb.x + reach > ax1) ax1 = wb.x + reach;
+      if (wb.y + reach > ay1) ay1 = wb.y + reach;
+    }
+    const x0 = Math.max(0, Math.floor(ax0));
+    const y0 = Math.max(0, Math.floor(ay0));
+    const x1 = Math.min(size - 1, Math.ceil(ax1));
+    const y1 = Math.min(size - 1, Math.ceil(ay1));
+
+    for (let py = y0; py <= y1; py++) {
+      const rowBase = py * size;
+      for (let px = x0; px <= x1; px++) {
+        let sum = 0;
+        for (let k = 0; k < wrapped.length; k++) {
+          const wb = wrapped[k];
+          const dx = px - wb.x, dy = py - wb.y;
+          const d2 = dx * dx + dy * dy;
+          const r2 = wb.r * wb.r;
+          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
+        }
+        if (sum > 0) {
+          const i = rowBase + px;
+          if (sum > fieldMax[i]) { fieldMax[i] = sum; winner[i] = c; }
         }
       }
     }
   }
 
-  // store chip positions for shadow pass
-  const chipCol = colors[nc - 1];
+  const blobThreshold = 1.3;
+  const softBand = softness > 0 ? blobThreshold * softness : 0;
+  for (let i = 0; i < size * size; i++) {
+    if (fieldMax[i] <= blobThreshold) continue;
+    const w = winner[i];
+    if (w < 0) continue;
+    const col = colors[blobClusters[w].colIdx];
+    const alpha = softBand > 0
+      ? Math.min(1, (fieldMax[i] - blobThreshold) / softBand)
+      : 1;
+    const idx = i * 4;
+    if (alpha >= 1) {
+      data[idx]     = col[0];
+      data[idx + 1] = col[1];
+      data[idx + 2] = col[2];
+    } else {
+      data[idx]     = Math.round(data[idx]     * (1 - alpha) + col[0] * alpha);
+      data[idx + 1] = Math.round(data[idx + 1] * (1 - alpha) + col[1] * alpha);
+      data[idx + 2] = Math.round(data[idx + 2] * (1 - alpha) + col[2] * alpha);
+    }
+  }
+
+  // ---- SMALL CHIPS on top ----
+  // each chip is a small oval pebble (rotated ellipse), not a rotated diamond.
+  // ellipses look like rocks; diamonds look like spiky stars (the user's complaint).
+  const chipCol = colors[chipIdx];
   const chips = [];
   for (let c = 0; c < chipCount; c++) {
     const cx = rng() * size;
     const cy = rng() * size;
     const r  = Math.max(2, chipSize + Math.round((rng() - 0.5) * 3));
+    const aspect = 0.55 + rng() * 0.40;  // ratio of minor/major axis
     const ca = rng() * Math.PI * 2;
-    chips.push({ cx, cy, r, ca });
+    chips.push({ cx, cy, r, ca, aspect });
   }
 
-  // shadow pass first (rendered behind the chips)
+  // shadow pass: a darkened ellipse offset in the light direction
   if (shadow > 0) {
     const sOff = Math.max(2, Math.round(chipSize * 0.6));
-    for (const { cx, cy, r, ca } of chips) {
+    const shadeFactor = 1 - shadow * 0.5;
+    for (const { cx, cy, r, ca, aspect } of chips) {
       const cosC = Math.cos(ca), sinC = Math.sin(ca);
       const scx = cx + shadowDx * sOff;
       const scy = cy + shadowDy * sOff;
+      const r2 = r * r;
+      const ra2 = r2 * aspect * aspect;
       for (let ddy = -r - 1; ddy <= r + 1; ddy++) {
         for (let ddx = -r - 1; ddx <= r + 1; ddx++) {
           const lx = ddx * cosC + ddy * sinC;
           const ly = -ddx * sinC + ddy * cosC;
-          if (Math.abs(lx) + Math.abs(ly) * 0.7 > r + 0.5) continue;
+          // ellipse SDF
+          if (lx * lx / r2 + ly * ly / ra2 > 1) continue;
           const px = ((Math.round(scx + ddx) % size) + size) % size;
           const py = ((Math.round(scy + ddy) % size) + size) % size;
           const i = (py * size + px) * 4;
-          // darken existing pixel
-          data[i]     = Math.round(data[i]     * (1 - shadow * 0.5));
-          data[i + 1] = Math.round(data[i + 1] * (1 - shadow * 0.5));
-          data[i + 2] = Math.round(data[i + 2] * (1 - shadow * 0.5));
+          data[i]     = Math.round(data[i]     * shadeFactor);
+          data[i + 1] = Math.round(data[i + 1] * shadeFactor);
+          data[i + 2] = Math.round(data[i + 2] * shadeFactor);
         }
       }
     }
   }
 
-  // chip pass on top
-  for (const { cx, cy, r, ca } of chips) {
+  // chip pass: solid ellipse pebbles
+  for (const { cx, cy, r, ca, aspect } of chips) {
     const cosC = Math.cos(ca), sinC = Math.sin(ca);
+    const r2 = r * r;
+    const ra2 = r2 * aspect * aspect;
     for (let ddy = -r; ddy <= r; ddy++) {
       for (let ddx = -r; ddx <= r; ddx++) {
         const lx = ddx * cosC + ddy * sinC;
         const ly = -ddx * sinC + ddy * cosC;
-        if (Math.abs(lx) + Math.abs(ly) * 0.7 > r) continue;
+        if (lx * lx / r2 + ly * ly / ra2 > 1) continue;
         const px = ((Math.round(cx + ddx) % size) + size) % size;
         const py = ((Math.round(cy + ddy) % size) + size) % size;
         const i = (py * size + px) * 4;
@@ -794,8 +1006,8 @@ export function generateHoneycomb(ctx, size, palette, opts = {}) {
   const {
     cellSize  = 20,
     border    = 2,
-    depth     = 0.3,
-    noise     = 0.15,
+    depth     = 0,
+    noise     = 0,
     tileable  = false,
     seed      = 0,
   } = opts;
@@ -891,9 +1103,9 @@ export function generateHoneycomb(ctx, size, palette, opts = {}) {
 export function generateCarbon(ctx, size, palette, opts = {}) {
   const {
     weaveSize = 8,
-    depth     = 0.4,
-    glossy    = 0.2,
-    noise     = 0.08,
+    depth     = 0,
+    glossy    = 0,
+    noise     = 0,
     tileable  = false,
     seed      = 0,
   } = opts;
@@ -978,7 +1190,7 @@ export function generateContour(ctx, size, palette, opts = {}) {
     scale      = 1.8,
     stretch    = 2.0,
     warp       = 0.8,
-    sharpness  = 0.85,
+    sharpness  = 1.0,
     coverage   = 0.45,
     puzzle     = 0,     // 0 = layered overlap, 1 = puzzle partition (value bands)
     tileable   = false,

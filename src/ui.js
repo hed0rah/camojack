@@ -5,14 +5,14 @@ import {
   generateVoronoi, generateNoise, generateDigital, generateBlotch,
   generateStripe, generateBrushstroke, generateFleck,
   generateRain, generateChip, generateGeometric,
-  generateHoneycomb, generateCarbon, generateContour,
+  generateHoneycomb, generateCarbon, generateContour, generateMetaball,
 } from './generators.js';
 import { PATTERN_PRESETS } from './presets.js';
 import { extractPalette, loadImageData } from './imageColors.js';
 
 // ---- all available generators ----
 const GENERATOR_KEYS = [
-  'voronoi', 'noise', 'digital', 'blotch',
+  'voronoi', 'noise', 'digital', 'blotch', 'metaball',
   'stripe', 'brushstroke', 'fleck', 'rain', 'chip', 'geometric',
   'honeycomb', 'carbon', 'contour',
 ];
@@ -158,8 +158,8 @@ const PARAM_DEFS = {
   voronoi: [
     { id: 'seed-count',    label: 'Seeds',    min: 2,    max: 64,   value: 12,  step: 1    },
     { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 5,    value: 1.0, step: 0.05 },
-    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0.25,step: 0.05 },
-    { id: 'gen-border',    label: 'Border',   min: 0,    max: 1,    value: 0.35,step: 0.05 },
+    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0,   step: 0.05 },
+    { id: 'gen-border',    label: 'Border',   min: 0,    max: 1,    value: 0,   step: 0.05 },
   ],
   noise: [
     { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 16,   value: 2.5, step: 0.1  },
@@ -175,8 +175,17 @@ const PARAM_DEFS = {
     { id: 'blob-count',    label: 'Count',    min: 1,    max: 120,  value: 20,  step: 1    },
     { id: 'blob-min',      label: 'Min Size', min: 0.01, max: 0.30, value: 0.04,step: 0.01 },
     { id: 'blob-max',      label: 'Max Size', min: 0.02, max: 0.60, value: 0.18,step: 0.01 },
-    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0.25,step: 0.05 },
+    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0,   step: 0.05 },
     { id: 'blob-noise',    label: 'Jitter',   min: 0,    max: 1.5,  value: 0.60,step: 0.05 },
+  ],
+  metaball: [
+    { id: 'mb-clusters',   label: 'Clusters', min: 4,    max: 60,   value: 18,  step: 1    },
+    { id: 'mb-core',       label: 'Core Size',min: 0.03, max: 0.20, value: 0.08,step: 0.01 },
+    { id: 'mb-satellites', label: 'Lobes',    min: 2,    max: 8,    value: 5,   step: 1    },
+    { id: 'mb-spread',     label: 'Spread',   min: 0.3,  max: 1.5,  value: 0.9, step: 0.05 },
+    { id: 'mb-sat-size',   label: 'Lobe Size',min: 0.2,  max: 1.0,  value: 0.65,step: 0.05 },
+    { id: 'mb-threshold',  label: 'Threshold',min: 0.5,  max: 4.0,  value: 1.5, step: 0.1  },
+    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0,   step: 0.05 },
   ],
   stripe: [
     { id: 'stripe-freq',   label: 'Frequency',min: 0.5,  max: 25,   value: 6.0, step: 0.5  },
@@ -190,7 +199,7 @@ const PARAM_DEFS = {
     { id: 'brush-blobs',   label: 'Blobs',    min: 1,    max: 40,   value: 7,   step: 1    },
     { id: 'brush-min',     label: 'Min Size', min: 0.01, max: 0.40, value: 0.10,step: 0.01 },
     { id: 'brush-max',     label: 'Max Size', min: 0.02, max: 0.70, value: 0.28,step: 0.01 },
-    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0.30,step: 0.05 },
+    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0,   step: 0.05 },
     { id: 'brush-jitter',  label: 'Jitter',   min: 0,    max: 1.5,  value: 0.50,step: 0.05 },
     { id: 'brush-elong',   label: 'Elongation',min: 0,   max: 3,    value: 0.40,step: 0.05 },
   ],
@@ -213,8 +222,8 @@ const PARAM_DEFS = {
     { id: 'chip-blob-max', label: 'Blob Max',  min: 0.02, max: 0.50, value: 0.16,step: 0.01 },
     { id: 'chip-count',    label: 'Chips',    min: 0,    max: 800,  value: 180, step: 10   },
     { id: 'chip-size',     label: 'Chip Size', min: 1,    max: 25,   value: 5,   step: 1    },
-    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0.20,step: 0.05 },
-    { id: 'chip-shadow',   label: 'Shadow',   min: 0,    max: 1,    value: 0.40,step: 0.05 },
+    { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0,   step: 0.05 },
+    { id: 'chip-shadow',   label: 'Shadow',   min: 0,    max: 1,    value: 0.25,step: 0.05 },
   ],
   geometric: [
     { id: 'geo-cells',     label: 'Cells',    min: 2,    max: 80,   value: 18,  step: 1    },
@@ -224,20 +233,20 @@ const PARAM_DEFS = {
   honeycomb: [
     { id: 'hex-cell',      label: 'Cell Size', min: 6,    max: 60,   value: 20,  step: 1    },
     { id: 'hex-border',    label: 'Border',   min: 0,    max: 6,    value: 2,   step: 0.5  },
-    { id: 'hex-depth',     label: 'Depth',    min: 0,    max: 0.8,  value: 0.30,step: 0.05 },
-    { id: 'hex-noise',     label: 'Noise',    min: 0,    max: 0.5,  value: 0.15,step: 0.05 },
+    { id: 'hex-depth',     label: 'Depth',    min: 0,    max: 0.8,  value: 0,   step: 0.05 },
+    { id: 'hex-noise',     label: 'Noise',    min: 0,    max: 0.5,  value: 0,   step: 0.05 },
   ],
   carbon: [
     { id: 'cf-weave',      label: 'Weave px', min: 3,    max: 30,   value: 8,   step: 1    },
-    { id: 'cf-depth',      label: 'Depth',    min: 0,    max: 0.8,  value: 0.40,step: 0.05 },
-    { id: 'cf-gloss',      label: 'Gloss',    min: 0,    max: 0.6,  value: 0.20,step: 0.05 },
-    { id: 'cf-noise',      label: 'Noise',    min: 0,    max: 0.3,  value: 0.08,step: 0.01 },
+    { id: 'cf-depth',      label: 'Depth',    min: 0,    max: 0.8,  value: 0,   step: 0.05 },
+    { id: 'cf-gloss',      label: 'Gloss',    min: 0,    max: 0.6,  value: 0,   step: 0.05 },
+    { id: 'cf-noise',      label: 'Noise',    min: 0,    max: 0.3,  value: 0,   step: 0.01 },
   ],
   contour: [
     { id: 'ct-scale',      label: 'Scale',    min: 0.5,  max: 6,    value: 1.8, step: 0.1  },
     { id: 'ct-stretch',    label: 'Stretch',  min: 0.5,  max: 5,    value: 2.0, step: 0.1  },
     { id: 'ct-warp',       label: 'Warp',     min: 0,    max: 3,    value: 0.8, step: 0.1  },
-    { id: 'ct-sharpness',  label: 'Sharpness',min: 0,    max: 1,    value: 0.85,step: 0.05 },
+    { id: 'ct-sharpness',  label: 'Sharpness',min: 0,    max: 1,    value: 1.0, step: 0.05 },
     { id: 'ct-coverage',   label: 'Coverage', min: 0.1,  max: 0.8,  value: 0.45,step: 0.05 },
     { id: 'ct-puzzle',     label: 'Puzzle',   min: 0,    max: 1,    value: 0,   step: 1    },
   ],
@@ -385,6 +394,8 @@ function runGenerator() {
       generateDigital(ctx, sz, pal, { cellSize: getParam('gen-cell', 5)|0, scale: getParam('gen-scale', 3.5), octaves: getParam('gen-octaves', 3)|0, tileable, seed }); break;
     case 'blotch':
       generateBlotch(ctx, sz, pal, { count: getParam('blob-count', 20)|0, minSize: getParam('blob-min', 0.04), maxSize: getParam('blob-max', 0.18), softness: getParam('gen-softness', 0.25), blobNoise: getParam('blob-noise', 0.60), seed }); break;
+    case 'metaball':
+      generateMetaball(ctx, sz, pal, { clusters: getParam('mb-clusters', 18)|0, coreRadius: getParam('mb-core', 0.08), satellites: getParam('mb-satellites', 5)|0, spread: getParam('mb-spread', 0.9), satSize: getParam('mb-sat-size', 0.65), threshold: getParam('mb-threshold', 0.55), softness: getParam('gen-softness', 0), seed }); break;
     case 'stripe':
       generateStripe(ctx, sz, pal, { stripeFreq: getParam('stripe-freq', 6.0), flowFreq: getParam('stripe-flow', 0.8), angle: getParam('stripe-angle', 78), edgeNoise: getParam('stripe-edge', 0.45), contrast: getParam('stripe-contrast', 0.5), tileable, seed }); break;
     case 'brushstroke':
