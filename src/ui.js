@@ -413,13 +413,13 @@ function runGenerator() {
 
   switch (state.generator) {
     case 'voronoi':
-      generateVoronoi(ctx, sz, pal, { seedCount: getParam('seed-count', 12)|0, scale: getParam('gen-scale', 1.0), softness: getParam('gen-softness', 0.25), border: getParam('gen-border', 0.35), seed }); break;
+      generateVoronoi(ctx, sz, pal, { seedCount: getParam('seed-count', 12)|0, scale: getParam('gen-scale', 1.0), softness: getParam('gen-softness', 0), border: getParam('gen-border', 0), seed }); break;
     case 'noise':
       generateNoise(ctx, sz, pal, { scale: getParam('gen-scale', 2.5), octaves: getParam('gen-octaves', 5)|0, warpStrength: getParam('gen-warp', 1.8), tileable, seed }); break;
     case 'digital':
       generateDigital(ctx, sz, pal, { cellSize: getParam('gen-cell', 5)|0, scale: getParam('gen-scale', 3.5), octaves: getParam('gen-octaves', 3)|0, tileable, seed }); break;
     case 'blotch':
-      generateBlotch(ctx, sz, pal, { count: getParam('blob-count', 20)|0, minSize: getParam('blob-min', 0.04), maxSize: getParam('blob-max', 0.18), softness: getParam('gen-softness', 0.25), blobNoise: getParam('blob-noise', 0.60), seed }); break;
+      generateBlotch(ctx, sz, pal, { count: getParam('blob-count', 20)|0, minSize: getParam('blob-min', 0.04), maxSize: getParam('blob-max', 0.18), softness: getParam('gen-softness', 0), blobNoise: getParam('blob-noise', 0.60), seed }); break;
     case 'metaball':
       generateMetaball(ctx, sz, pal, { clusters: getParam('mb-clusters', 18)|0, coreRadius: getParam('mb-core', 0.08), satellites: getParam('mb-satellites', 5)|0, spread: getParam('mb-spread', 0.9), satSize: getParam('mb-sat-size', 0.65), threshold: getParam('mb-threshold', 1.5), softness: getParam('gen-softness', 0), bgIdx: getParam('mb-bg', 0)|0, accentClusters: getParam('mb-accent', 0)|0, accentCore: getParam('mb-accent-core', 0.04), accentThreshold: getParam('mb-accent-thr', 1.7), seed }); break;
     case 'stripe':
@@ -431,7 +431,7 @@ function runGenerator() {
     case 'rain':
       generateRain(ctx, sz, pal, { dashCount: getParam('rain-count', 300)|0, dashWidth: getParam('rain-width', 3)|0, dashMinH: getParam('rain-min-h', 15)|0, dashMaxH: getParam('rain-max-h', 50)|0, angleVar: getParam('rain-angle', 8), seed }); break;
     case 'chip':
-      generateChip(ctx, sz, pal, { blobCount: getParam('chip-blobs', 12)|0, blobMin: getParam('chip-blob-min', 0.06), blobMax: getParam('chip-blob-max', 0.16), chipCount: getParam('chip-count', 180)|0, chipSize: getParam('chip-size', 5)|0, softness: getParam('gen-softness', 0.20), shadow: getParam('chip-shadow', 0.40), seed }); break;
+      generateChip(ctx, sz, pal, { blobCount: getParam('chip-blobs', 12)|0, blobMin: getParam('chip-blob-min', 0.06), blobMax: getParam('chip-blob-max', 0.16), chipCount: getParam('chip-count', 180)|0, chipSize: getParam('chip-size', 5)|0, softness: getParam('gen-softness', 0), shadow: getParam('chip-shadow', 0.40), seed }); break;
     case 'geometric':
       generateGeometric(ctx, sz, pal, { cellCount: getParam('geo-cells', 18)|0, angularity: getParam('geo-angular', 0.50), scale: getParam('gen-scale', 1.0), seed }); break;
     case 'honeycomb':
@@ -439,7 +439,7 @@ function runGenerator() {
     case 'carbon':
       generateCarbon(ctx, sz, pal, { weaveSize: getParam('cf-weave', 8)|0, depth: getParam('cf-depth', 0.40), glossy: getParam('cf-gloss', 0.20), noise: getParam('cf-noise', 0.08), tileable, seed }); break;
     case 'contour':
-      generateContour(ctx, sz, pal, { scale: getParam('ct-scale', 1.8), stretch: getParam('ct-stretch', 2.0), warp: getParam('ct-warp', 0.8), sharpness: getParam('ct-sharpness', 0.85), coverage: getParam('ct-coverage', 0.45), puzzle: getParam('ct-puzzle', 0), tileable, seed }); break;
+      generateContour(ctx, sz, pal, { scale: getParam('ct-scale', 1.8), stretch: getParam('ct-stretch', 2.0), warp: getParam('ct-warp', 0.8), sharpness: getParam('ct-sharpness', 1.0), coverage: getParam('ct-coverage', 0.45), puzzle: getParam('ct-puzzle', 0), tileable, seed }); break;
   }
 
   tc.updatePreview();
