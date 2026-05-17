@@ -304,6 +304,30 @@ export const PALETTES = {
     colors: ['1a0e08', '4a2e1a', '006241', '4d8c6b', 'ede0c8'],
     bgIdx: 2,
   },
+  brand_usps: {
+    label: 'USPS',
+    // 5 of the 7 USPS commemoration colors -- USPS Blue (sonic eagle),
+    // Pony Express (1860 brown), Airmail Red (Inverted Jenny), Gold Seal
+    // (1970 logo), Parchment White (18th-c. mail paper). dropped Mr. ZIP
+    // orange + Carrier Red to keep 5 stops with the widest spread.
+    colors: ['18438b', '6b3f1a', 'c72a1c', 'c8a24a', 'f4e9d2'],
+    bgIdx: 4,
+  },
+  brand_harley: {
+    label: 'Harley-Davidson',
+    // black + harley orange #f47216 + worn chrome. iconic biker palette,
+    // works as a real-world tactical scheme too.
+    colors: ['0a0a0a', '3a2410', '8c3c0e', 'f47216', 'c8c0b0'],
+    bgIdx: 0,
+  },
+  brand_barbie: {
+    label: 'Barbie',
+    // PMS 219C #e0218a is the canonical Barbie Pink (mattel brand guide).
+    // padded with deep wine + pale pink + near-white pink for the camo
+    // spread. yes you can make pink camo.
+    colors: ['2a0418', '6e0a3a', 'e0218a', 'f88cb8', 'fef0f5'],
+    bgIdx: 4,
+  },
 
   custom: {
     label: '-- Custom --',
