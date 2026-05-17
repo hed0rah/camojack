@@ -446,6 +446,15 @@
           </div>
         </div>
 
+        <div class="tool-section" data-show-for="fill">
+          <div class="section-title section-gap">FILL</div>
+          <div class="slider-row">
+            <label title="Color-distance threshold (0 = exact match, 255 = fills everything)">Tolerance</label>
+            <div class="slider-track"><input type="range" id="fill-tolerance" min="0" max="255" value="30"></div>
+            <span class="sl-val" id="fill-tolerance-val">30</span>
+          </div>
+        </div>
+
         <div class="tool-section" data-show-for="rect ellipse">
           <div class="section-title section-gap">SHAPE</div>
           <div class="form-row">
@@ -480,6 +489,11 @@
           <label>Spacing</label>
           <div class="slider-track"><input type="range" id="brush-spacing" min="5" max="100" value="30"></div>
           <span class="sl-val" id="brush-spacing-val">30%</span>
+        </div>
+        <div class="slider-row">
+          <label title="Random dab-position jitter (brush/eraser/smear/blob/spray)">Scatter</label>
+          <div class="slider-track"><input type="range" id="brush-scatter" min="0" max="200" value="0"></div>
+          <span class="sl-val" id="brush-scatter-val">0%</span>
         </div>
 
         <div class="section-title section-gap">SYMMETRY</div>

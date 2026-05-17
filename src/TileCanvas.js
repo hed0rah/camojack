@@ -39,6 +39,8 @@ export class TileCanvas {
     this.stampRandomRotate = true; // randomize per click
     this.blobJaggedness = 0;   // 0 = default geometry, 1 = max spread/satSize boost
     this.pathPressure = 0.5;   // path-blob speed-thinning amount: 0 = no thinning, 1 = max
+    this.scatter      = 0;     // 0..1 dab-position jitter as fraction of brushSize
+    this.fillTolerance = 30;   // flood-fill RGB-distance threshold (0..255)
 
     // spray parameters (per-type knobs live in TileCanvas so the renderer
     // can read them directly without re-querying the DOM each dot)
@@ -135,6 +137,8 @@ export class TileCanvas {
   setStampRandomRotate(v) { this.stampRandomRotate = v; }
   setBlobJaggedness(v) { this.blobJaggedness = v; }
   setPathPressure(v)   { this.pathPressure   = v; }
+  setScatter(v)        { this.scatter        = v; }
+  setFillTolerance(v)  { this.fillTolerance  = v; }
   setSprayDensity(v)   { this.sprayDensity   = v; }
   setSprayFalloff(v)   { this.sprayFalloff   = v; }
   setSprayTight(v)     { this.sprayTight     = v; }
@@ -781,9 +785,17 @@ export class TileCanvas {
     const useStroke = this._strokeData !== null;
     const imageData = useStroke ? this._strokeData : this.ctx.getImageData(0, 0, this.size, this.size);
 
+    // scatter applies to free-form paint tools where jittering the dab
+    // position is a useful texture knob; clone/line want exact placement
+    // so they get a 0 jitter.
+    const scatterTools = { brush: 1, eraser: 1, smear: 1, blob: 1, spray: 1 };
+    const sAmt = (this.scatter > 0 && scatterTools[this.tool]) ? this.scatter * this.brushSize : 0;
+
     if (dist === 0) {
       // single point: paint exactly once (no double-application bug)
-      this._applyAtPoint(imageData, from.x, from.y, 0, 0);
+      const jx = sAmt ? (Math.random() - 0.5) * 2 * sAmt : 0;
+      const jy = sAmt ? (Math.random() - 0.5) * 2 * sAmt : 0;
+      this._applyAtPoint(imageData, from.x + jx, from.y + jy, 0, 0);
     } else {
       const steps = Math.max(1, Math.ceil(dist / spacing));
       const invDist = 1 / dist;
@@ -791,8 +803,12 @@ export class TileCanvas {
       const ndy = dy * invDist;
       for (let i = 0; i <= steps; i++) {
         const t = i / steps;
-        const x = from.x + dx * t;
-        const y = from.y + dy * t;
+        let x = from.x + dx * t;
+        let y = from.y + dy * t;
+        if (sAmt) {
+          x += (Math.random() - 0.5) * 2 * sAmt;
+          y += (Math.random() - 0.5) * 2 * sAmt;
+        }
         this._applyAtPoint(imageData, x, y, ndx, ndy);
       }
     }
@@ -939,7 +955,7 @@ export class TileCanvas {
     const { data, width, height } = imageData;
     const src = this._smearSnap ?? imageData;
     const r   = this.brushSize;
-    const op  = this.opacity * 0.6;
+    const op  = this.opacity;
     const pull = r * 0.4;
 
     const x0 = Math.max(0, Math.ceil(cx - r));
@@ -1928,7 +1944,7 @@ export class TileCanvas {
 
     if (tr === fr && tg === fg && tb === fb) return;
 
-    const tol = 30;
+    const tol = this.fillTolerance;
     const visited = new Uint8Array(width * height);
     const stack = [px + py * width];
 

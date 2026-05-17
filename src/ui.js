@@ -1091,6 +1091,24 @@ function setupBrushPanel() {
     state.tileCanvas.setSpacing(v / 100);
   });
 
+  const scatterSl = document.getElementById('brush-scatter');
+  if (scatterSl) {
+    scatterSl.addEventListener('input', () => {
+      const v = parseInt(scatterSl.value);
+      document.getElementById('brush-scatter-val').textContent = v + '%';
+      state.tileCanvas.setScatter(v / 100);
+    });
+  }
+
+  const fillSl = document.getElementById('fill-tolerance');
+  if (fillSl) {
+    fillSl.addEventListener('input', () => {
+      const v = parseInt(fillSl.value);
+      document.getElementById('fill-tolerance-val').textContent = v;
+      state.tileCanvas.setFillTolerance(v);
+    });
+  }
+
   document.getElementById('sym-h').addEventListener('change', updateSymmetry);
   document.getElementById('sym-v').addEventListener('change', updateSymmetry);
 }
