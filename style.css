@@ -555,27 +555,29 @@ input[type="range"]::-moz-range-thumb {
 #color-preview-wrap {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   margin-bottom: 10px;
 }
-#color-preview {
-  width: 30px;
-  height: 30px;
-  border-radius: 0;
-  border: 1px solid var(--border-light);
-  flex-shrink: 0;
-}
-#color2-preview {
-  width: 22px;
-  height: 22px;
+.color-slot {
+  width: 28px;
+  height: 28px;
   border-radius: 0;
   border: 1px solid var(--border-light);
   flex-shrink: 0;
   cursor: pointer;
+  transition: outline-color 0.08s, box-shadow 0.08s;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+}
+.color-slot:hover { border-color: var(--border-hi); }
+.color-slot.active {
+  outline-color: var(--text-hi);
+  border-color: var(--text-hi);
 }
 #btn-swap-colors {
   padding: 2px 6px;
-  font-size: 9px;
+  font-size: 14px;
+  line-height: 1;
   font-weight: 700;
   flex-shrink: 0;
 }

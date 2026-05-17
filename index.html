@@ -41,6 +41,7 @@
         <div class="toolbar-sep"></div>
         <button id="btn-undo" title="Undo [Ctrl+Z]">Undo</button>
         <button id="btn-redo" title="Redo [Ctrl+Y]">Redo</button>
+        <button id="btn-invert" title="Invert canvas colors (255 - RGB)">Invert</button>
       </div>
 
       <div id="topbar-right">
@@ -317,9 +318,9 @@
 
         <div class="section-title section-gap">ACTIVE COLOR</div>
         <div id="color-preview-wrap">
-          <div id="color-preview"></div>
-          <div id="color2-preview" title="Secondary color (Alt+click swatch, X to swap)"></div>
-          <button id="btn-swap-colors" title="Swap colors [X]">X</button>
+          <div id="color-preview" class="color-slot active" data-slot="primary" title="Primary color -- click to activate"></div>
+          <button id="btn-swap-colors" title="Swap primary &harr; secondary [X]">&#x21C4;</button>
+          <div id="color2-preview" class="color-slot" data-slot="secondary" title="Secondary color -- click to activate. Right-click any palette swatch to set this."></div>
           <div id="hex-row">
             <span class="hex-hash">#</span>
             <input type="text" id="hex-input" maxlength="6" spellcheck="false">
@@ -506,6 +507,11 @@
           <label title="Random dab-position jitter (brush/eraser/smear/blob/spray)">Scatter</label>
           <div class="slider-track"><input type="range" id="brush-scatter" min="0" max="200" value="0"></div>
           <span class="sl-val" id="brush-scatter-val">0%</span>
+        </div>
+        <div class="slider-row">
+          <label title="When scatter is on, spreads dabs out so coverage builds gradually instead of filling fast">Sc Rate</label>
+          <div class="slider-track"><input type="range" id="brush-scatter-rate" min="100" max="1000" value="100"></div>
+          <span class="sl-val" id="brush-scatter-rate-val">1.0x</span>
         </div>
 
         <div class="section-title section-gap">SYMMETRY</div>

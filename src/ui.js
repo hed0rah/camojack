@@ -33,6 +33,7 @@ const state = {
   activeIdx:   0,
   activeRgb:   [74, 103, 65],
   activeRgb2:  [40, 30, 20],   // secondary color
+  activeSlot:  'primary',      // which color slot the swatches/sliders edit
   generator:   'voronoi',
   seed:        1337,
   tileCanvas:  null,
@@ -61,7 +62,9 @@ export function initUI(tc) {
   setupExport();
 
   tc.onColorPick = (rgb, hex) => {
-    state.activeRgb = rgb;
+    // eyedropper drops into whichever slot is active
+    if (state.activeSlot === 'primary') state.activeRgb  = rgb;
+    else                                state.activeRgb2 = rgb;
     applyColorToUI(rgb);
   };
 
@@ -145,6 +148,8 @@ function setupToolbar() {
 
   document.getElementById('btn-undo').addEventListener('click', () => state.tileCanvas.undo());
   document.getElementById('btn-redo').addEventListener('click', () => state.tileCanvas.redo());
+  const btnInvert = document.getElementById('btn-invert');
+  if (btnInvert) btnInvert.addEventListener('click', () => state.tileCanvas.invert());
 
   document.getElementById('tile-size-sel').addEventListener('change', e => {
     const s = parseInt(e.target.value);
@@ -184,13 +189,34 @@ function swapColors() {
   const tmp = state.activeRgb;
   state.activeRgb = [...state.activeRgb2];
   state.activeRgb2 = [...tmp];
-  applyColorToUI(state.activeRgb);
-  updateColor2Preview();
+  // both previews swap visually; active slot stays the same
+  document.getElementById('color-preview').style.background  = '#' + rgbToHex(state.activeRgb);
+  document.getElementById('color2-preview').style.background = '#' + rgbToHex(state.activeRgb2);
+  // refresh sliders to whichever slot is active now
+  const activeRgb = state.activeSlot === 'primary' ? state.activeRgb : state.activeRgb2;
+  refreshSliders(activeRgb);
 }
 
-function updateColor2Preview() {
-  const el = document.getElementById('color2-preview');
-  if (el) el.style.background = '#' + rgbToHex(state.activeRgb2);
+// switch which color slot the HSL / hex / palette-click controls edit.
+// just updates state + visual outline -- doesn't mutate any color.
+function setActiveSlot(slot) {
+  state.activeSlot = slot;
+  document.querySelectorAll('.color-slot').forEach(el => {
+    el.classList.toggle('active', el.dataset.slot === slot);
+  });
+  const rgb = slot === 'primary' ? state.activeRgb : state.activeRgb2;
+  refreshSliders(rgb);
+}
+
+// update the hex input and HSL sliders to reflect a given color without
+// mutating either slot (used after slot switches and swap).
+function refreshSliders(rgb) {
+  const hex = rgbToHex(rgb);
+  const [h, s, l] = rgbToHsl(rgb);
+  $('hex-input').value = hex.toUpperCase();
+  $('hue-sl').value = h;  $('hue-val').textContent = h;
+  $('sat-sl').value = s;  $('sat-val').textContent = s;
+  $('lit-sl').value = l;  $('lit-val').textContent = l;
 }
 
 // ---- generator panel ----
@@ -881,17 +907,29 @@ function setupPalettePanel() {
     const hex = hexIn.value.replace(/[^0-9a-fA-F]/g, '').padEnd(6, '0').slice(0, 6);
     hexIn.value = hex.toUpperCase();
     const rgb = hexToRgb(hex);
-    state.activeRgb = rgb;
-    applyColorToUI(rgb, true);
-    commitSwatchColor(hex);
+    if (state.activeSlot === 'primary') {
+      state.activeRgb = rgb;
+      applyColorToUI(rgb, true);
+      commitSwatchColor(hex);
+    } else {
+      state.activeRgb2 = rgb;
+      applyColorToUI(rgb, true);
+    }
   });
 
   // swap colors button
   const swapBtn = document.getElementById('btn-swap-colors');
   if (swapBtn) swapBtn.addEventListener('click', swapColors);
 
-  // set initial color2 preview
-  updateColor2Preview();
+  // clicking either color swatch makes it the active slot (sliders /
+  // hex / palette clicks edit that slot until you click the other one).
+  document.querySelectorAll('.color-slot').forEach(el => {
+    el.addEventListener('click', () => setActiveSlot(el.dataset.slot));
+  });
+
+  // initialize both swatch previews from state
+  document.getElementById('color-preview').style.background  = '#' + rgbToHex(state.activeRgb);
+  document.getElementById('color2-preview').style.background = '#' + rgbToHex(state.activeRgb2);
 }
 
 function renderSwatches() {
@@ -902,16 +940,19 @@ function renderSwatches() {
     const sw = document.createElement('div');
     sw.className = 'swatch' + (idx === state.activeIdx ? ' active' : '');
     sw.style.background = '#' + hex;
-    sw.title = '#' + hex.toUpperCase();
+    sw.title = '#' + hex.toUpperCase() + ' (click = active slot; right-click = inactive slot)';
+    // left click sets the currently-active slot.
+    // alt-click or right-click sets the inactive slot without changing focus.
     sw.addEventListener('click', (e) => {
       if (e.altKey) {
-        // alt+click sets secondary color
-        state.activeRgb2 = hexToRgb(hex);
-        state.tileCanvas.setColor2(state.activeRgb2);
-        updateColor2Preview();
+        setInactiveSlot(hex);
       } else {
         setActiveSwatch(idx);
       }
+    });
+    sw.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      setInactiveSlot(hex);
     });
     sw.addEventListener('dblclick', () => {
       const input = document.createElement('input');
@@ -926,7 +967,7 @@ function renderSwatches() {
         PALETTES.custom.colors = [...state.palette];
         document.getElementById('palette-preset').value = 'custom';
         sw.style.background = '#' + newHex;
-        if (idx === state.activeIdx) {
+        if (idx === state.activeIdx && state.activeSlot === 'primary') {
           state.activeRgb = hexToRgb(newHex);
           applyColorToUI(state.activeRgb);
         }
@@ -937,16 +978,40 @@ function renderSwatches() {
   });
 }
 
-function setActiveSwatch(idx) {
-  state.activeIdx = idx;
-  const swatches = $('palette-swatches').children;
-  for (let i = 0; i < swatches.length; i++) {
-    swatches[i].classList.toggle('active', i === idx);
+// write a hex color into whichever slot is NOT currently active. used by
+// right-click and alt-click on palette swatches so the user can stock the
+// secondary color without losing focus.
+function setInactiveSlot(hex) {
+  const rgb = hexToRgb(hex);
+  if (state.activeSlot === 'primary') {
+    state.activeRgb2 = rgb;
+    state.tileCanvas.setColor2(rgb);
+    $('color2-preview').style.background = '#' + hex;
+  } else {
+    state.activeRgb = rgb;
+    state.tileCanvas.setColor(rgb);
+    $('color-preview').style.background = '#' + hex;
   }
+}
+
+// set the active slot to a palette entry. only primary tracks activeIdx
+// (the palette pointer for the "edit this swatch when sliders move" flow);
+// when secondary is active, palette state is left untouched.
+function setActiveSwatch(idx) {
   const hex = state.palette[idx];
-  state.activeRgb = hexToRgb(hex);
-  applyColorToUI(state.activeRgb);
-  state.tileCanvas.setColor(state.activeRgb);
+  const rgb = hexToRgb(hex);
+
+  if (state.activeSlot === 'primary') {
+    state.activeIdx = idx;
+    const swatches = $('palette-swatches').children;
+    for (let i = 0; i < swatches.length; i++) {
+      swatches[i].classList.toggle('active', i === idx);
+    }
+    state.activeRgb = rgb;
+  } else {
+    state.activeRgb2 = rgb;
+  }
+  applyColorToUI(rgb);
 }
 
 function onHslChange() {
@@ -958,11 +1023,19 @@ function onHslChange() {
   $('lit-val').textContent = l;
 
   const rgb = hslToRgb([h, s, l]);
-  state.activeRgb = rgb;
   const hex = rgbToHex(rgb);
-  $('color-preview').style.background = '#' + hex;
-  $('hex-input').value = hex.toUpperCase();
-  commitSwatchColor(hex);
+
+  if (state.activeSlot === 'primary') {
+    state.activeRgb = rgb;
+    $('color-preview').style.background = '#' + hex;
+    $('hex-input').value = hex.toUpperCase();
+    commitSwatchColor(hex);   // primary edits live-update palette[activeIdx]
+  } else {
+    state.activeRgb2 = rgb;
+    state.tileCanvas.setColor2(rgb);
+    $('color2-preview').style.background = '#' + hex;
+    $('hex-input').value = hex.toUpperCase();
+  }
 }
 
 function commitSwatchColor(hex) {
@@ -978,11 +1051,19 @@ function commitSwatchColor(hex) {
   state.tileCanvas.setColor(state.activeRgb);
 }
 
+// update the preview swatch + hex/HSL inputs for whichever slot is
+// currently active, and push the color to the tile canvas as that slot.
 function applyColorToUI(rgb, skipHex = false) {
   const hex = rgbToHex(rgb);
   const [h, s, l] = rgbToHsl(rgb);
 
-  $('color-preview').style.background = '#' + hex;
+  if (state.activeSlot === 'primary') {
+    $('color-preview').style.background = '#' + hex;
+    state.tileCanvas.setColor(rgb);
+  } else {
+    $('color2-preview').style.background = '#' + hex;
+    state.tileCanvas.setColor2(rgb);
+  }
   if (!skipHex) $('hex-input').value = hex.toUpperCase();
 
   $('hue-sl').value = h;
@@ -991,8 +1072,6 @@ function applyColorToUI(rgb, skipHex = false) {
   $('hue-val').textContent = h;
   $('sat-val').textContent = s;
   $('lit-val').textContent = l;
-
-  state.tileCanvas.setColor(rgb);
 }
 
 // ---- brush panel ----
@@ -1097,6 +1176,16 @@ function setupBrushPanel() {
       const v = parseInt(scatterSl.value);
       document.getElementById('brush-scatter-val').textContent = v + '%';
       state.tileCanvas.setScatter(v / 100);
+    });
+  }
+
+  const scatterRateSl = document.getElementById('brush-scatter-rate');
+  if (scatterRateSl) {
+    scatterRateSl.addEventListener('input', () => {
+      const v = parseInt(scatterRateSl.value);
+      const mul = v / 100;
+      document.getElementById('brush-scatter-rate-val').textContent = mul.toFixed(1) + 'x';
+      state.tileCanvas.setScatterRate(mul);
     });
   }
 

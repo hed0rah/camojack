@@ -40,6 +40,7 @@ export class TileCanvas {
     this.blobJaggedness = 0;   // 0 = default geometry, 1 = max spread/satSize boost
     this.pathPressure = 0.5;   // path-blob speed-thinning amount: 0 = no thinning, 1 = max
     this.scatter      = 0;     // 0..1 dab-position jitter as fraction of brushSize
+    this.scatterRate  = 1.0;   // 1.0 = every spacing step fires when scatter on; >1 = spread out
     this.fillTolerance = 30;   // flood-fill RGB-distance threshold (0..255)
 
     // spray parameters (per-type knobs live in TileCanvas so the renderer
@@ -138,6 +139,7 @@ export class TileCanvas {
   setBlobJaggedness(v) { this.blobJaggedness = v; }
   setPathPressure(v)   { this.pathPressure   = v; }
   setScatter(v)        { this.scatter        = v; }
+  setScatterRate(v)    { this.scatterRate    = v; }
   setFillTolerance(v)  { this.fillTolerance  = v; }
   setSprayDensity(v)   { this.sprayDensity   = v; }
   setSprayFalloff(v)   { this.sprayFalloff   = v; }
@@ -213,6 +215,21 @@ export class TileCanvas {
 
   exportTile() {
     return new Promise(resolve => this.canvas.toBlob(resolve, 'image/png'));
+  }
+
+  // invert every pixel's RGB. classic stencil-camo flip -- positive
+  // pattern becomes its negative. pushed to history so it's undoable.
+  invert() {
+    this._saveHistory();
+    const id = this.ctx.getImageData(0, 0, this.size, this.size);
+    const d = id.data;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i]     = 255 - d[i];
+      d[i + 1] = 255 - d[i + 1];
+      d[i + 2] = 255 - d[i + 2];
+    }
+    this.ctx.putImageData(id, 0, 0);
+    this.updatePreview();
   }
 
   exportSheet(cols, rows) {
@@ -776,7 +793,6 @@ export class TileCanvas {
   // ---- stroke interpolation ----
 
   _applyStroke(from, to) {
-    const spacing = Math.max(1, this.brushSize * this.spacing);
     const dx = to.x - from.x, dy = to.y - from.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
@@ -790,6 +806,11 @@ export class TileCanvas {
     // so they get a 0 jitter.
     const scatterTools = { brush: 1, eraser: 1, smear: 1, blob: 1, spray: 1 };
     const sAmt = (this.scatter > 0 && scatterTools[this.tool]) ? this.scatter * this.brushSize : 0;
+
+    // when scatter is on, scatterRate widens the spacing so coverage
+    // builds gradually instead of choking the canvas on every drag.
+    const spacingMul = sAmt ? this.scatterRate : 1;
+    const spacing = Math.max(1, this.brushSize * this.spacing * spacingMul);
 
     if (dist === 0) {
       // single point: paint exactly once (no double-application bug)
