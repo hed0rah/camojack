@@ -236,6 +236,75 @@ export const PALETTES = {
     bgIdx: 2,
   },
 
+  // ---- brand palettes ----
+  // logo hex from brandcolors.net where available, padded with shadow/tint
+  // stops so each palette has the dark->light spread that the camo
+  // generators actually use. multi-color brands (lego/usa) order by
+  // luminance, not by brand hierarchy.
+
+  brand_cocacola: {
+    label: 'Coca-Cola',
+    // ed1c16 is the brandcolors.net value; coke's own 2007 brand guide
+    // cites f40009 in some places. either reads as "coke red" on screen.
+    colors: ['1a0805', '5a0a08', 'ed1c16', 'f4a29f', 'f5f5f5'],
+    bgIdx: 4,
+  },
+  brand_mcdonalds: {
+    label: "McDonald's",
+    // golden arches yellow ffc72c + corporate red da291c
+    colors: ['1a1408', '8b2c1a', 'da291c', 'ffc72c', 'ffe99a'],
+    bgIdx: 3,
+  },
+  brand_patriot: {
+    label: 'Patriot (USA)',
+    // old glory red #b22234 + old glory blue #3c3b6e (us army flag spec)
+    colors: ['0a0c1a', '3c3b6e', '6e6e8e', 'b22234', 'f0f0f5'],
+    bgIdx: 2,
+  },
+  brand_pepsi: {
+    label: 'Pepsi',
+    // pepsi red e32934 + pepsi blue 004b93 (brandcolors.net)
+    colors: ['050818', '004b93', '4a7ab8', 'e32934', 'f4f4f0'],
+    bgIdx: 2,
+  },
+  brand_mtndew: {
+    label: 'Mountain Dew',
+    // legacy bottle green 006b3a + modern lime 45a82a
+    colors: ['0c1a0a', '006b3a', '45a82a', 'b8e62d', 'fff0a5'],
+    bgIdx: 1,
+  },
+  brand_doritos: {
+    label: 'Doritos',
+    // nacho-cheese palette: black bag, red, orange, cheese yellow
+    colors: ['0a0a0a', '361106', 'c8102e', 'f58a1f', 'ffd83c'],
+    bgIdx: 0,
+  },
+  brand_pringles: {
+    label: 'Pringles',
+    // logo red e80022 plus mr-p moustache tan
+    colors: ['1a1a18', '8c1626', 'e80022', 'ffc9a8', 'f4e8d8'],
+    bgIdx: 0,
+  },
+  brand_fedex: {
+    label: 'FedEx',
+    // brand purple 4d148c + brand orange ff6600
+    colors: ['0a0410', '4d148c', '7a3eb5', 'ff6600', 'ffc8a0'],
+    bgIdx: 1,
+  },
+  brand_ups: {
+    label: 'UPS',
+    // pullman brown 351c15 + corporate gold ffb500. browns-only camo,
+    // works surprisingly well as a desert/woodland substitute.
+    colors: ['1a0d08', '351c15', '6a3b1c', 'ffb500', 'fff0c0'],
+    bgIdx: 1,
+  },
+  brand_starbucks: {
+    label: 'Starbucks',
+    // siren green 006241 (post-2011) + espresso browns + foam cream
+    colors: ['1a0e08', '4a2e1a', '006241', '4d8c6b', 'ede0c8'],
+    bgIdx: 2,
+  },
+
   custom: {
     label: '-- Custom --',
     colors: ['1a2010', '2d4a1e', '4a6741', '8b6914', 'c4a35a'],
