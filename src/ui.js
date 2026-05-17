@@ -1024,7 +1024,9 @@ function setupBrushPanel() {
     tc.setBlobPath(mode === 'path');
     tc.setBlobSingle(mode === 'single');
     tc.setBlobLayered(mode === 'layered');
+    syncBlobSubrows(mode);
   });
+  syncBlobSubrows(document.getElementById('blob-mode').value);
 
   const jagSl  = document.getElementById('blob-jaggedness');
   const jagVal = document.getElementById('blob-jaggedness-val');
@@ -1033,6 +1035,16 @@ function setupBrushPanel() {
       const v = parseInt(jagSl.value);
       state.tileCanvas.setBlobJaggedness(v / 100);
       jagVal.textContent = v === 0 ? 'default' : '+' + v + '%';
+    });
+  }
+
+  const pressSl  = document.getElementById('blob-pressure');
+  const pressVal = document.getElementById('blob-pressure-val');
+  if (pressSl && pressVal) {
+    pressSl.addEventListener('input', () => {
+      const v = parseInt(pressSl.value);
+      state.tileCanvas.setPathPressure(v / 100);
+      pressVal.textContent = v + '%';
     });
   }
 
@@ -1118,6 +1130,10 @@ function setupSprayPanel() {
     typeSel.addEventListener('change', () => syncSpraySubrows(typeSel.value));
     syncSpraySubrows(typeSel.value);
   }
+}
+
+function syncBlobSubrows(mode) {
+  document.querySelectorAll('.blob-path-only').forEach(el => el.hidden = mode !== 'path');
 }
 
 function syncSpraySubrows(type) {

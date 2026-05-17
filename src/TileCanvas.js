@@ -38,6 +38,7 @@ export class TileCanvas {
     this.stampRotation = 0;    // fixed rotation (radians)
     this.stampRandomRotate = true; // randomize per click
     this.blobJaggedness = 0;   // 0 = default geometry, 1 = max spread/satSize boost
+    this.pathPressure = 0.5;   // path-blob speed-thinning amount: 0 = no thinning, 1 = max
 
     // spray parameters (per-type knobs live in TileCanvas so the renderer
     // can read them directly without re-querying the DOM each dot)
@@ -133,6 +134,7 @@ export class TileCanvas {
   setStampRotation(rad) { this.stampRotation = rad; }
   setStampRandomRotate(v) { this.stampRandomRotate = v; }
   setBlobJaggedness(v) { this.blobJaggedness = v; }
+  setPathPressure(v)   { this.pathPressure   = v; }
   setSprayDensity(v)   { this.sprayDensity   = v; }
   setSprayFalloff(v)   { this.sprayFalloff   = v; }
   setSprayTight(v)     { this.sprayTight     = v; }
@@ -738,6 +740,35 @@ export class TileCanvas {
     };
   }
 
+  // ---- shared paint primitives ----
+
+  // alpha-blend rc/gc/bc into the RGB triple at byte offset i. callers
+  // pre-multiply hardness/falloff/opacity into alpha so this stays a
+  // single source-over composite. kept tiny so V8 will inline it from
+  // the hot paint loops.
+  _blendPixel(data, i, rc, gc, bc, alpha) {
+    const inv = 1 - alpha;
+    data[i]     = (data[i]     * inv + rc * alpha) | 0;
+    data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
+    data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+  }
+
+  // metaball field sum at (px, py) over blobs of {x, y, r}. uses the
+  // bounded r2/(r2+d2) kernel with the 9*r2 reach cutoff that the paint
+  // blobs rely on. stamp-mask builders use a different (unbounded)
+  // kernel and don't go through this.
+  _metaballSum(px, py, blobs) {
+    let sum = 0;
+    for (let k = 0; k < blobs.length; k++) {
+      const b = blobs[k];
+      const dx = px - b.x, dy = py - b.y;
+      const d2 = dx * dx + dy * dy;
+      const r2 = b.r * b.r;
+      if (d2 < r2 * 9) sum += r2 / (r2 + d2);
+    }
+    return sum;
+  }
+
   // ---- stroke interpolation ----
 
   _applyStroke(from, to) {
@@ -929,11 +960,7 @@ export class TileCanvas {
         const sy = py - ndy * pull * t;
 
         const [sr, sg, sb] = this._bilinear(src.data, width, height, sx, sy);
-
-        const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - alpha) + sr * alpha);
-        data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + sg * alpha);
-        data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + sb * alpha);
+        this._blendPixel(data, (py * width + px) * 4, sr, sg, sb, alpha);
       }
     }
   }
@@ -965,11 +992,7 @@ export class TileCanvas {
 
         // sample from source position (toroidal via _bilinear)
         const [sr, sg, sb] = this._bilinear(src.data, width, height, px + odx, py + ody);
-
-        const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - alpha) + sr * alpha);
-        data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + sg * alpha);
-        data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + sb * alpha);
+        this._blendPixel(data, (py * width + px) * 4, sr, sg, sb, alpha);
       }
     }
   }
@@ -1056,29 +1079,11 @@ export class TileCanvas {
 
     for (let py = y0; py <= y1; py++) {
       for (let px = x0; px <= x1; px++) {
-        let sum = 0;
-        for (let k = 0; k < blobs.length; k++) {
-          const b = blobs[k];
-          const dx = px - b.x, dy = py - b.y;
-          const d2 = dx * dx + dy * dy;
-          const r2 = b.r * b.r;
-          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
-        }
+        const sum = this._metaballSum(px, py, blobs);
         if (sum <= threshold) continue;
-
-        let alpha;
-        if (softBand <= 0) {
-          alpha = op;
-        } else {
-          alpha = Math.min(1, (sum - threshold) / softBand) * op;
-        }
+        const alpha = softBand <= 0 ? op : Math.min(1, (sum - threshold) / softBand) * op;
         if (alpha <= 0) continue;
-
-        const i = (py * width + px) * 4;
-        const inv = 1 - alpha;
-        data[i]     = (data[i]     * inv + rc * alpha) | 0;
-        data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
-        data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+        this._blendPixel(data, (py * width + px) * 4, rc, gc, bc, alpha);
       }
     }
   }
@@ -1113,11 +1118,15 @@ export class TileCanvas {
     if (spine.length < 2) spine.push(pts[pts.length - 1]);
 
     // speed-based radii: drawing fast = thinner stroke, slow = thicker.
+    // pathPressure controls how much speed thins the line: 0 = no thinning,
+    // 0.5 = the previous fixed half-thinning, 1 = thins to 15% at peak speed.
     const speeds = spine.map(p => p.speed || 0);
     const maxSpeed = Math.max(1, ...speeds);
+    const press = Math.max(0, Math.min(1, this.pathPressure));
+    const minScale = Math.max(0.15, 1 - press);
     const spineRadii = spine.map(p => {
       const speedNorm = (p.speed || 0) / maxSpeed;
-      return r * (1.0 - speedNorm * 0.5);   // range: 0.5r to 1.0r
+      return r * (1 - speedNorm * (1 - minScale));
     });
     for (let pass = 0; pass < 3; pass++) {
       for (let i = 1; i < spineRadii.length - 1; i++) {
@@ -1185,29 +1194,11 @@ export class TileCanvas {
 
     for (let py = y0; py <= y1; py++) {
       for (let px = x0; px <= x1; px++) {
-        let sum = 0;
-        for (let k = 0; k < blobs.length; k++) {
-          const b = blobs[k];
-          const dx = px - b.x, dy = py - b.y;
-          const d2 = dx * dx + dy * dy;
-          const r2 = b.r * b.r;
-          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
-        }
+        const sum = this._metaballSum(px, py, blobs);
         if (sum <= threshold) continue;
-
-        let alpha;
-        if (softBand <= 0) {
-          alpha = op;
-        } else {
-          alpha = Math.min(1, (sum - threshold) / softBand) * op;
-        }
+        const alpha = softBand <= 0 ? op : Math.min(1, (sum - threshold) / softBand) * op;
         if (alpha <= 0) continue;
-
-        const i = (py * width + px) * 4;
-        const inv = 1 - alpha;
-        data[i]     = (data[i]     * inv + rc * alpha) | 0;
-        data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
-        data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+        this._blendPixel(data, (py * width + px) * 4, rc, gc, bc, alpha);
       }
     }
 
@@ -1564,12 +1555,7 @@ export class TileCanvas {
 
         const alpha = (a / 255) * op;
         if (alpha <= 0) continue;
-
-        const i = (rowBase + px) * 4;
-        const inv = 1 - alpha;
-        data[i]     = (data[i]     * inv + rc * alpha) | 0;
-        data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
-        data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+        this._blendPixel(data, (rowBase + px) * 4, rc, gc, bc, alpha);
       }
     }
   }
@@ -1761,11 +1747,7 @@ export class TileCanvas {
           }
 
           if (alpha <= 0) continue;
-          alpha = Math.min(1, alpha);
-          const i = (py * width + px) * 4;
-          data[i]     = Math.round(data[i]     * (1 - alpha) + rc * alpha);
-          data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + gc * alpha);
-          data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bc * alpha);
+          this._blendPixel(data, (py * width + px) * 4, rc, gc, bc, Math.min(1, alpha));
         }
       }
     } else {
@@ -1795,11 +1777,7 @@ export class TileCanvas {
           }
 
           if (alpha <= 0) continue;
-          alpha = Math.min(1, alpha);
-          const i = (py * width + px) * 4;
-          data[i]     = Math.round(data[i]     * (1 - alpha) + rc * alpha);
-          data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + gc * alpha);
-          data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bc * alpha);
+          this._blendPixel(data, (py * width + px) * 4, rc, gc, bc, Math.min(1, alpha));
         }
       }
     }
@@ -1823,15 +1801,10 @@ export class TileCanvas {
       for (let px = 0; px < width; px++) {
         const pdx = px - start.x, pdy = py - start.y;
         const t = len2 > 0 ? Math.max(0, Math.min(1, (pdx * dx + pdy * dy) / len2)) : 0;
-
         const cr = r1 + (r2 - r1) * t;
         const cg = g1 + (g2 - g1) * t;
         const cb = b1 + (b2 - b1) * t;
-
-        const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - op) + cr * op);
-        data[i + 1] = Math.round(data[i + 1] * (1 - op) + cg * op);
-        data[i + 2] = Math.round(data[i + 2] * (1 - op) + cb * op);
+        this._blendPixel(data, (py * width + px) * 4, cr, cg, cb, op);
       }
     }
 
