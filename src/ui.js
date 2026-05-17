@@ -46,6 +46,7 @@ const state = {
 export function initUI(tc) {
   state.tileCanvas = tc;
 
+  setupTheme();
   setupToolbar();
   setupGeneratorPanel();
   setupPresetPanel();
@@ -87,6 +88,29 @@ export function initUI(tc) {
 
   // random algo + palette + seed on load
   randomizeAll();
+}
+
+// ---- theme ----
+
+function setupTheme() {
+  const stored = (() => {
+    try { return localStorage.getItem('camojack:theme'); } catch { return null; }
+  })();
+  applyTheme(stored === 'light' ? 'light' : 'dark');
+
+  const btn = document.getElementById('btn-theme');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+    try { localStorage.setItem('camojack:theme', next); } catch {}
+  });
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const btn = document.getElementById('btn-theme');
+  if (btn) btn.textContent = theme === 'light' ? 'Dark' : 'Light';
 }
 
 // ---- toolbar ----
