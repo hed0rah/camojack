@@ -37,7 +37,15 @@ export class TileCanvas {
     this.activeStampId = null;
     this.stampRotation = 0;    // fixed rotation (radians)
     this.stampRandomRotate = true; // randomize per click
-    this.blobScale  = 0;       // 0 = auto (scales with brushSize), >0 = fixed perturbation px
+    this.blobJaggedness = 0;   // 0 = default geometry, 1 = max spread/satSize boost
+
+    // spray parameters (per-type knobs live in TileCanvas so the renderer
+    // can read them directly without re-querying the DOM each dot)
+    this.sprayDensity   = 1.0;  // 0.1..4.0, density multiplier on the base count
+    this.sprayFalloff   = 1.0;  // 0 = solid disc, 1 = soft falloff
+    this.sprayTight     = 0.40; // cluster gaussian sigma as fraction of r
+    this.sprayDotMax    = 6;    // splatter dot-radius max in pixels
+    this.sprayFleckJit  = 0.60; // fleck shape jitter 0..1
     this._blobSeed  = 0;
     this._blobPathPts = [];
     this._offsetView = false;  // seamless editing: canvas shifted by half
@@ -124,7 +132,12 @@ export class TileCanvas {
   setActiveStamp(id) { this.activeStampId = id; }
   setStampRotation(rad) { this.stampRotation = rad; }
   setStampRandomRotate(v) { this.stampRandomRotate = v; }
-  setBlobScale(v)   { this.blobScale  = v; }
+  setBlobJaggedness(v) { this.blobJaggedness = v; }
+  setSprayDensity(v)   { this.sprayDensity   = v; }
+  setSprayFalloff(v)   { this.sprayFalloff   = v; }
+  setSprayTight(v)     { this.sprayTight     = v; }
+  setSprayDotMax(v)    { this.sprayDotMax    = v; }
+  setSprayFleckJit(v)  { this.sprayFleckJit  = v; }
   setShapeMode(m)   { this.shapeMode  = m; }
   setShapeFilled(v) { this.shapeFilled = v; }
   setSymmetry(h, v) { this.symmetry = { h, v }; }
@@ -979,8 +992,16 @@ export class TileCanvas {
         nSat = 5; spread = 1.0; satSize = 0.70; threshold = 1.55; break;
     }
 
-    // manual perturbation slider scales satellite reach when > 0
-    const reachScale = this.blobScale > 0 ? this.blobScale / Math.max(1, r) : 1.0;
+    // jaggedness: 0 = default geometry, 1 = wider reach + (for jagged style)
+    // fatter spikes. lets the user produce big spiky blobs without having to
+    // crank up brushSize.
+    const jag = Math.max(0, Math.min(1, this.blobJaggedness));
+    spread *= 1 + jag * 1.5;
+    if (style === 'jagged') {
+      satSize *= 1 + jag * 0.6;
+      nSat += Math.round(jag * 3);   // a few more spikes at high jag
+    }
+    const reachScale = 1.0;
     const coreR = r * 0.55;
     const ca = Math.cos(axisAngle), sa = Math.sin(axisAngle);
 
@@ -1583,48 +1604,103 @@ export class TileCanvas {
     const op  = this.opacity;
     const [rc, gc, bc] = this.color;
     const type = this.sprayType;
+    const dMul = this.sprayDensity;     // user density multiplier
+    const fall = this.sprayFalloff;     // 0 = flat, 1 = soft radial falloff
 
     if (type === 'cluster') {
-      const density = Math.round(r * 2);
+      const density = Math.round(r * 2 * dMul);
+      const sigma = r * this.sprayTight;
       const alpha = op * 0.7;
       for (let k = 0; k < density; k++) {
         const u1 = Math.random(), u2 = Math.random();
-        const mag = r * 0.4 * Math.sqrt(-2 * Math.log(u1 + 0.001));
+        const mag = sigma * Math.sqrt(-2 * Math.log(u1 + 0.001));
         if (mag > r) continue;
         const angle = Math.PI * 2 * u2;
         const px = Math.round(cx + Math.cos(angle) * mag);
         const py = Math.round(cy + Math.sin(angle) * mag);
-        this._blendDotTiled(data, S, px, py, rc, gc, bc, alpha);
+        const a = alpha * (1 - fall * (mag / r));
+        this._blendDotTiled(data, S, px, py, rc, gc, bc, a);
       }
     } else if (type === 'splatter') {
-      const count = Math.round(r * 0.4) + 3;
+      const count = Math.round((r * 0.4 + 3) * dMul);
       const alpha = op * 0.85;
+      const dotMaxR = Math.max(1, this.sprayDotMax);
       for (let k = 0; k < count; k++) {
         const angle = Math.random() * Math.PI * 2;
         const d = Math.random() * r;
         const dotCx = cx + Math.cos(angle) * d;
         const dotCy = cy + Math.sin(angle) * d;
-        const dotR = 1 + Math.floor(Math.random() * Math.max(1, r * 0.15));
+        const dotR = 1 + Math.floor(Math.random() * dotMaxR);
         const dotR2 = dotR * dotR;
+        const a = alpha * (1 - fall * 0.5 * (d / r));
 
         for (let dy = -dotR; dy <= dotR; dy++) {
           for (let dx = -dotR; dx <= dotR; dx++) {
             if (dx * dx + dy * dy > dotR2) continue;
             const px = Math.round(dotCx + dx);
             const py = Math.round(dotCy + dy);
-            this._blendDotTiled(data, S, px, py, rc, gc, bc, alpha);
+            this._blendDotTiled(data, S, px, py, rc, gc, bc, a);
+          }
+        }
+      }
+    } else if (type === 'stipple') {
+      // sparse high-contrast dots scattered at low density -- good for
+      // building texture on top of a base layer (think MARPAT pixels but
+      // hand-placed).
+      const density = Math.round((r * 0.3 + 2) * dMul);
+      for (let k = 0; k < density; k++) {
+        const angle = Math.random() * Math.PI * 2;
+        const d = Math.sqrt(Math.random()) * r;   // uniform disc sample
+        const px = Math.round(cx + Math.cos(angle) * d);
+        const py = Math.round(cy + Math.sin(angle) * d);
+        // dot of size 1-3px
+        const dotR = 1 + (Math.random() < 0.3 ? 1 : 0);
+        const a = op * (1 - fall * (d / r));
+        for (let dy = -dotR; dy <= dotR; dy++) {
+          for (let dx = -dotR; dx <= dotR; dx++) {
+            if (dx * dx + dy * dy > dotR * dotR) continue;
+            this._blendDotTiled(data, S, px + dx, py + dy, rc, gc, bc, a);
+          }
+        }
+      }
+    } else if (type === 'fleck') {
+      // small irregular flecks: 3-6 pixel clusters with mild jitter.
+      // approximates the speckled texture of flecktarn or duck-hunter camo
+      // without needing the heavy metaball machinery.
+      const count = Math.round((r * 0.25 + 2) * dMul);
+      const jit = this.sprayFleckJit;
+      for (let k = 0; k < count; k++) {
+        const angle = Math.random() * Math.PI * 2;
+        const d = Math.sqrt(Math.random()) * r;
+        const fcx = cx + Math.cos(angle) * d;
+        const fcy = cy + Math.sin(angle) * d;
+        const a = op * (1 - fall * (d / r));
+        // 3-5 pixel sub-cluster forming an irregular blob
+        const subCount = 3 + Math.floor(Math.random() * 3);
+        const subR = 1 + Math.random() * 2;
+        for (let j = 0; j < subCount; j++) {
+          const sa = Math.random() * Math.PI * 2;
+          const sd = Math.random() * subR * (1 + jit * 0.8);
+          const fpx = Math.round(fcx + Math.cos(sa) * sd);
+          const fpy = Math.round(fcy + Math.sin(sa) * sd);
+          this._blendDotTiled(data, S, fpx, fpy, rc, gc, bc, a);
+          // optional second pixel adjacent for shape variation
+          if (Math.random() < jit) {
+            this._blendDotTiled(data, S, fpx + 1, fpy, rc, gc, bc, a);
+            this._blendDotTiled(data, S, fpx, fpy + 1, rc, gc, bc, a);
           }
         }
       }
     } else {
-      const density = Math.round(r * 1.5);
+      // uniform
+      const density = Math.round(r * 1.5 * dMul);
       for (let k = 0; k < density; k++) {
         const angle = Math.random() * Math.PI * 2;
         const d     = Math.random() * r;
         const px = Math.round(cx + Math.cos(angle) * d);
         const py = Math.round(cy + Math.sin(angle) * d);
-        const alpha = op * (1 - d / r);
-        this._blendDotTiled(data, S, px, py, rc, gc, bc, alpha);
+        const a = op * (1 - fall * (d / r));
+        this._blendDotTiled(data, S, px, py, rc, gc, bc, a);
       }
     }
   }

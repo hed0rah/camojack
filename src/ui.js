@@ -82,6 +82,9 @@ export function initUI(tc) {
     document.getElementById('brush-hardness-val').textContent = Math.round(hardness * 100) + '%';
   };
 
+  // show only the active tool's panel sections (universal controls stay)
+  syncToolPanelVisibility(state.tool);
+
   // random algo + palette + seed on load
   randomizeAll();
 }
@@ -128,12 +131,26 @@ function setupToolbar() {
 
 // cached on first call
 let _toolBtns = null;
+let _toolSections = null;
 function setTool(tool) {
   state.tool = tool;
   state.tileCanvas.setTool(tool);
   if (!_toolBtns) _toolBtns = document.querySelectorAll('.tool-btn');
   for (let i = 0; i < _toolBtns.length; i++) {
     _toolBtns[i].classList.toggle('active', _toolBtns[i].dataset.tool === tool);
+  }
+  syncToolPanelVisibility(tool);
+}
+
+// each tool-specific section declares data-show-for="tool1 tool2 ...".
+// universal controls (size/opacity/hardness/spacing/symmetry) live outside
+// any .tool-section and are always visible.
+function syncToolPanelVisibility(tool) {
+  if (!_toolSections) _toolSections = document.querySelectorAll('.tool-section');
+  for (let i = 0; i < _toolSections.length; i++) {
+    const sec = _toolSections[i];
+    const tools = (sec.dataset.showFor || '').split(/\s+/);
+    sec.hidden = !tools.includes(tool);
   }
 }
 
@@ -985,13 +1002,17 @@ function setupBrushPanel() {
     tc.setBlobLayered(mode === 'layered');
   });
 
-  const perturbSl = document.getElementById('blob-perturb');
-  const perturbVal = document.getElementById('blob-perturb-val');
-  perturbSl.addEventListener('input', () => {
-    const v = parseInt(perturbSl.value);
-    state.tileCanvas.setBlobScale(v);
-    perturbVal.textContent = v === 0 ? 'auto' : v;
-  });
+  const jagSl  = document.getElementById('blob-jaggedness');
+  const jagVal = document.getElementById('blob-jaggedness-val');
+  if (jagSl && jagVal) {
+    jagSl.addEventListener('input', () => {
+      const v = parseInt(jagSl.value);
+      state.tileCanvas.setBlobJaggedness(v / 100);
+      jagVal.textContent = v === 0 ? 'default' : '+' + v + '%';
+    });
+  }
+
+  setupSprayPanel();
 
   // shape mode (rect/ellipse)
   const shapeSel = document.getElementById('shape-mode');
@@ -1042,6 +1063,51 @@ function updateSymmetry() {
   const h = document.getElementById('sym-h').checked;
   const v = document.getElementById('sym-v').checked;
   state.tileCanvas.setSymmetry(h, v);
+}
+
+// ---- spray panel ----
+
+// each spray type wants a different parameter; show/hide subrows so the
+// user only sees what's relevant. always-shown: density + falloff.
+function setupSprayPanel() {
+  const tc = state.tileCanvas;
+  const typeSel = document.getElementById('spray-type');
+
+  const wire = (slId, valId, setter, fmt) => {
+    const sl  = document.getElementById(slId);
+    const val = document.getElementById(valId);
+    if (!sl || !val) return;
+    sl.addEventListener('input', () => {
+      const v = parseInt(sl.value);
+      setter(v);
+      val.textContent = fmt(v);
+    });
+  };
+
+  wire('spray-density',  'spray-density-val',  v => tc.setSprayDensity(v / 100), v => v + '%');
+  wire('spray-falloff',  'spray-falloff-val',  v => tc.setSprayFalloff(v / 100), v => v + '%');
+  wire('spray-tight',    'spray-tight-val',    v => tc.setSprayTight(v / 100),   v => v + '%');
+  wire('spray-dotmax',   'spray-dotmax-val',   v => tc.setSprayDotMax(v),        v => String(v));
+  wire('spray-fleckjit', 'spray-fleckjit-val', v => tc.setSprayFleckJit(v / 100),v => v + '%');
+
+  if (typeSel) {
+    typeSel.addEventListener('change', () => syncSpraySubrows(typeSel.value));
+    syncSpraySubrows(typeSel.value);
+  }
+}
+
+function syncSpraySubrows(type) {
+  const map = {
+    cluster:  '.spray-cluster-only',
+    splatter: '.spray-splatter-only',
+    fleck:    '.spray-fleck-only',
+  };
+  for (const sel of Object.values(map)) {
+    document.querySelectorAll(sel).forEach(el => el.hidden = true);
+  }
+  if (map[type]) {
+    document.querySelectorAll(map[type]).forEach(el => el.hidden = false);
+  }
 }
 
 // ---- stamp library ----
