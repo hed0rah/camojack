@@ -271,6 +271,24 @@ export class TileCanvas {
     const noCursorTools = ['picker', 'fill'];
     if (noCursorTools.includes(this.tool)) return;
 
+    // line tool: preview the pending segment between clicks
+    if (this.tool === 'line' && this._lineStart) {
+      let end = p;
+      if (this._shiftHeld) end = this._snapAngle(this._lineStart, end);
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(this._lineStart.x, this._lineStart.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(this._lineStart.x, this._lineStart.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+    }
+
     const r = this.brushSize;
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.lineWidth = 1;
