@@ -224,18 +224,18 @@ function refreshSliders(rgb) {
 const PARAM_DEFS = {
   voronoi: [
     { id: 'seed-count',    label: 'Seeds',    min: 2,    max: 64,   value: 12,  step: 1    },
-    { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 5,    value: 1.0, step: 0.05 },
+    { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 3,    value: 1.0, step: 0.05 },
     { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0,   step: 0.05 },
     { id: 'gen-border',    label: 'Border',   min: 0,    max: 1,    value: 0,   step: 0.05 },
   ],
   noise: [
-    { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 16,   value: 2.5, step: 0.1  },
+    { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 5,    value: 1.5, step: 0.1  },
     { id: 'gen-octaves',   label: 'Octaves',  min: 1,    max: 10,   value: 5,   step: 1    },
     { id: 'gen-warp',      label: 'Warp',     min: 0,    max: 6,    value: 1.8, step: 0.1  },
   ],
   digital: [
     { id: 'gen-cell',      label: 'Cell px',  min: 1,    max: 40,   value: 5,   step: 1    },
-    { id: 'gen-scale',     label: 'Scale',    min: 0.5,  max: 16,   value: 3.5, step: 0.5  },
+    { id: 'gen-scale',     label: 'Scale',    min: 0.5,  max: 6,    value: 2.5, step: 0.1  },
     { id: 'gen-octaves',   label: 'Octaves',  min: 1,    max: 8,    value: 3,   step: 1    },
   ],
   blotch: [
@@ -316,7 +316,7 @@ const PARAM_DEFS = {
     { id: 'cf-noise',      label: 'Noise',    min: 0,    max: 0.3,  value: 0,   step: 0.01 },
   ],
   contour: [
-    { id: 'ct-scale',      label: 'Scale',    min: 0.5,  max: 6,    value: 1.8, step: 0.1  },
+    { id: 'ct-scale',      label: 'Scale',    min: 0.5,  max: 3.5,  value: 1.5, step: 0.1  },
     { id: 'ct-stretch',    label: 'Stretch',  min: 0.5,  max: 5,    value: 2.0, step: 0.1  },
     { id: 'ct-warp',       label: 'Warp',     min: 0,    max: 3,    value: 0.8, step: 0.1  },
     { id: 'ct-sharpness',  label: 'Sharpness',min: 0,    max: 1,    value: 1.0, step: 0.05 },
