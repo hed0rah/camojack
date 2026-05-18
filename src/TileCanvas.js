@@ -37,7 +37,19 @@ export class TileCanvas {
     this.activeStampId = null;
     this.stampRotation = 0;    // fixed rotation (radians)
     this.stampRandomRotate = true; // randomize per click
-    this.blobScale  = 0;       // 0 = auto (scales with brushSize), >0 = fixed perturbation px
+    this.blobJaggedness = 0;   // 0 = default geometry, 1 = max spread/satSize boost
+    this.pathPressure = 0.5;   // path-blob speed-thinning amount: 0 = no thinning, 1 = max
+    this.scatter      = 0;     // 0..1 dab-position jitter as fraction of brushSize
+    this.scatterRate  = 1.0;   // 1.0 = every spacing step fires when scatter on; >1 = spread out
+    this.fillTolerance = 30;   // flood-fill RGB-distance threshold (0..255)
+
+    // spray parameters (per-type knobs live in TileCanvas so the renderer
+    // can read them directly without re-querying the DOM each dot)
+    this.sprayDensity   = 1.0;  // 0.1..4.0, density multiplier on the base count
+    this.sprayFalloff   = 1.0;  // 0 = solid disc, 1 = soft falloff
+    this.sprayTight     = 0.40; // cluster gaussian sigma as fraction of r
+    this.sprayDotMax    = 6;    // splatter dot-radius max in pixels
+    this.sprayFleckJit  = 0.60; // fleck shape jitter 0..1
     this._blobSeed  = 0;
     this._blobPathPts = [];
     this._offsetView = false;  // seamless editing: canvas shifted by half
@@ -124,7 +136,16 @@ export class TileCanvas {
   setActiveStamp(id) { this.activeStampId = id; }
   setStampRotation(rad) { this.stampRotation = rad; }
   setStampRandomRotate(v) { this.stampRandomRotate = v; }
-  setBlobScale(v)   { this.blobScale  = v; }
+  setBlobJaggedness(v) { this.blobJaggedness = v; }
+  setPathPressure(v)   { this.pathPressure   = v; }
+  setScatter(v)        { this.scatter        = v; }
+  setScatterRate(v)    { this.scatterRate    = v; }
+  setFillTolerance(v)  { this.fillTolerance  = v; }
+  setSprayDensity(v)   { this.sprayDensity   = v; }
+  setSprayFalloff(v)   { this.sprayFalloff   = v; }
+  setSprayTight(v)     { this.sprayTight     = v; }
+  setSprayDotMax(v)    { this.sprayDotMax    = v; }
+  setSprayFleckJit(v)  { this.sprayFleckJit  = v; }
   setShapeMode(m)   { this.shapeMode  = m; }
   setShapeFilled(v) { this.shapeFilled = v; }
   setSymmetry(h, v) { this.symmetry = { h, v }; }
@@ -196,6 +217,21 @@ export class TileCanvas {
     return new Promise(resolve => this.canvas.toBlob(resolve, 'image/png'));
   }
 
+  // invert every pixel's RGB. classic stencil-camo flip -- positive
+  // pattern becomes its negative. pushed to history so it's undoable.
+  invert() {
+    this._saveHistory();
+    const id = this.ctx.getImageData(0, 0, this.size, this.size);
+    const d = id.data;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i]     = 255 - d[i];
+      d[i + 1] = 255 - d[i + 1];
+      d[i + 2] = 255 - d[i + 2];
+    }
+    this.ctx.putImageData(id, 0, 0);
+    this.updatePreview();
+  }
+
   exportSheet(cols, rows) {
     const S = this.size;
     const tmp = document.createElement('canvas');
@@ -258,6 +294,24 @@ export class TileCanvas {
     const noCursorTools = ['picker', 'fill'];
     if (noCursorTools.includes(this.tool)) return;
 
+    // line tool: preview the pending segment between clicks
+    if (this.tool === 'line' && this._lineStart) {
+      let end = p;
+      if (this._shiftHeld) end = this._snapAngle(this._lineStart, end);
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(this._lineStart.x, this._lineStart.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(this._lineStart.x, this._lineStart.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+    }
+
     const r = this.brushSize;
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.lineWidth = 1;
@@ -292,6 +346,45 @@ export class TileCanvas {
     }
   }
 
+  // live preview of the blob-path spine while the user drags. shows the
+  // recorded points as a polyline plus a ghost circle at the cursor so
+  // the user can see what shape they're about to commit on mouseup.
+  _drawPathPreview() {
+    if (!this._cursorCtx) return;
+    const pts = this._blobPathPts;
+    if (!pts || pts.length === 0) return;
+    const ctx = this._cursorCtx;
+    const S = this.size;
+    ctx.clearRect(0, 0, S, S);
+
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // outer shadow for contrast on any background
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+
+    // inner line
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+
+    // ghost circle at current point showing brush radius
+    const last = pts[pts.length - 1];
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(last.x, last.y, this.brushSize, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
   // rAF-batched paint loop: multiple requests coalesce into one frame
   _scheduleFrame(flags) {
     if (flags & 1) this._needsPreview = true;
@@ -321,10 +414,16 @@ export class TileCanvas {
   _bindEvents() {
     const c = this.canvas;
     c.addEventListener('mousedown',  e => this._onDown(e));
-    c.addEventListener('mousemove',  e => { this._onMove(e); this._updateCoords(e); });
-    c.addEventListener('mouseup',    e => this._onUp(e));
-    c.addEventListener('mouseleave', e => { this._onUp(e); this._clearCursor(); });
+    // canvas-level move drives cursor preview only when not painting --
+    // active strokes use window-level listeners so they survive leaving
+    // the canvas. this fixes the "stroke dies when you wander off" UX.
+    c.addEventListener('mousemove',  e => { if (!this._painting) { this._onMove(e); this._updateCoords(e); } });
+    c.addEventListener('mouseleave', () => { if (!this._painting) this._clearCursor(); });
     c.addEventListener('contextmenu', e => e.preventDefault());
+
+    // pre-bind window handlers so attach/detach use the same function ref
+    this._winMove = e => { this._onMove(e); this._updateCoords(e); };
+    this._winUp   = e => this._onUp(e);
 
     window.addEventListener('keydown', e => {
       if (e.ctrlKey && e.key === 'z') { this.undo(); e.preventDefault(); }
@@ -391,6 +490,21 @@ export class TileCanvas {
 
   // ---- mouse handlers ----
 
+  // attach window-level move/up so a stroke survives leaving the canvas
+  _attachDrag() {
+    if (this._dragAttached) return;
+    window.addEventListener('mousemove', this._winMove);
+    window.addEventListener('mouseup',   this._winUp);
+    this._dragAttached = true;
+  }
+
+  _detachDrag() {
+    if (!this._dragAttached) return;
+    window.removeEventListener('mousemove', this._winMove);
+    window.removeEventListener('mouseup',   this._winUp);
+    this._dragAttached = false;
+  }
+
   _onDown(e) {
     if (e.button !== 0) return;
     const pos = this._getTilePos(e);
@@ -439,6 +553,7 @@ export class TileCanvas {
       this._shapeStart = pos;
       this._shapeBase = this.ctx.getImageData(0, 0, this.size, this.size);
       this._painting = true;
+      this._attachDrag();
       return;
     }
 
@@ -447,6 +562,8 @@ export class TileCanvas {
       this._saveHistory();
       this._blobPathPts = [{ x: pos.x, y: pos.y, speed: 0 }];
       this._painting = true;
+      this._lastPos = pos;
+      this._attachDrag();
       return;
     }
 
@@ -465,11 +582,14 @@ export class TileCanvas {
       const layers = 2 + Math.floor(Math.random() * 3); // 2-4 stamps
       const imageData = this.ctx.getImageData(0, 0, this.size, this.size);
       for (let n = 0; n < layers; n++) {
+        // one seed per layer (shared across wraparound copies) so layers
+        // differ from each other even when blobVary is off.
+        const layerSeed = ((Math.random() * 0xFFFFFFFF) | 0) >>> 0;
         const ox = (Math.random() - 0.5) * r * 0.6;
         const oy = (Math.random() - 0.5) * r * 0.6;
         const positions = this._expandPositions(pos.x + ox, pos.y + oy);
         for (const [px, py] of positions) {
-          this._paintBlob(imageData, px, py);
+          this._paintBlob(imageData, px, py, layerSeed);
         }
       }
       this.ctx.putImageData(imageData, 0, 0);
@@ -481,6 +601,7 @@ export class TileCanvas {
     this._painting = true;
     this._lastPos = pos;
     this._saveHistory();
+    this._attachDrag();
 
     // grab one ImageData at stroke start, reuse across the whole drag
     this._strokeData = this.ctx.getImageData(0, 0, this.size, this.size);
@@ -513,20 +634,36 @@ export class TileCanvas {
   _onMove(e) {
     if (!this._painting) return;
     const pos = this._getTilePos(e);
+    const S = this.size;
+    const inBounds = pos.x >= 0 && pos.x < S && pos.y >= 0 && pos.y < S;
 
-    // blob path mode: collect points with speed
-    if (this.tool === 'blob' && this.blobPath && this._blobPathPts.length > 0) {
+    // blob path mode: only record while cursor is inside canvas. when the
+    // user leaves and comes back, treat re-entry as a new segment by
+    // pushing the entry point with zero speed (so we don't streak across
+    // the panels).
+    if (this.tool === 'blob' && this.blobPath) {
+      if (!inBounds) {
+        this._lastPos = null;
+        return;
+      }
       const prev = this._blobPathPts[this._blobPathPts.length - 1];
-      const dx = pos.x - prev.x, dy = pos.y - prev.y;
-      const speed = Math.sqrt(dx * dx + dy * dy);
+      const dx = pos.x - (prev?.x ?? pos.x);
+      const dy = pos.y - (prev?.y ?? pos.y);
+      const speed = (this._lastPos === null) ? 0 : Math.sqrt(dx * dx + dy * dy);
       this._blobPathPts.push({ x: pos.x, y: pos.y, speed });
+      this._lastPos = pos;
+      this._drawPathPreview();
       return;
     }
 
-    // shape/gradient preview: restore base, redraw
+    // shape/gradient preview: clamp end to canvas so rubber-band stays
+    // sane even when the cursor wanders into the side panels.
     if ((this.tool === 'rect' || this.tool === 'ellipse' || this.tool === 'gradient') && this._shapeStart && this._shapeBase) {
       this.ctx.putImageData(this._shapeBase, 0, 0);
-      let end = pos;
+      let end = {
+        x: Math.max(0, Math.min(S - 1, pos.x)),
+        y: Math.max(0, Math.min(S - 1, pos.y)),
+      };
       if (this._shiftHeld) {
         if (this.tool === 'gradient') {
           end = this._snapAngle(this._shapeStart, end);
@@ -543,7 +680,16 @@ export class TileCanvas {
       return;
     }
 
-    // standard stroke tools
+    // standard stroke tools: don't paint while outside canvas; on
+    // re-entry, snap _lastPos to current so we don't draw a long streak
+    // back to where the cursor exited.
+    if (!inBounds) {
+      this._lastPos = null;
+      return;
+    }
+    if (this._lastPos === null) {
+      this._lastPos = pos;
+    }
     this._applyStroke(this._lastPos, pos);
     // smear/clone use the persistent stroke buffer's data as the source snapshot
     // no more full getImageData per frame
@@ -559,13 +705,17 @@ export class TileCanvas {
 
   _onUp(e) {
     if (!this._painting) return;
+    this._detachDrag();
 
     // finalize blob path
     if (this.tool === 'blob' && this.blobPath && this._blobPathPts.length > 1) {
+      this._clearCursor();           // wipe the path-preview polyline
       this._renderBlobPath(this._blobPathPts);
       this._blobPathPts = [];
       this._painting = false;
+      this._lastPos = null;
       this.updatePreview();
+      this._drawCursor();            // restore brush outline
       return;
     }
     this._blobPathPts = [];
@@ -611,10 +761,38 @@ export class TileCanvas {
     };
   }
 
+  // ---- shared paint primitives ----
+
+  // alpha-blend rc/gc/bc into the RGB triple at byte offset i. callers
+  // pre-multiply hardness/falloff/opacity into alpha so this stays a
+  // single source-over composite. kept tiny so V8 will inline it from
+  // the hot paint loops.
+  _blendPixel(data, i, rc, gc, bc, alpha) {
+    const inv = 1 - alpha;
+    data[i]     = (data[i]     * inv + rc * alpha) | 0;
+    data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
+    data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+  }
+
+  // metaball field sum at (px, py) over blobs of {x, y, r}. uses the
+  // bounded r2/(r2+d2) kernel with the 9*r2 reach cutoff that the paint
+  // blobs rely on. stamp-mask builders use a different (unbounded)
+  // kernel and don't go through this.
+  _metaballSum(px, py, blobs) {
+    let sum = 0;
+    for (let k = 0; k < blobs.length; k++) {
+      const b = blobs[k];
+      const dx = px - b.x, dy = py - b.y;
+      const d2 = dx * dx + dy * dy;
+      const r2 = b.r * b.r;
+      if (d2 < r2 * 9) sum += r2 / (r2 + d2);
+    }
+    return sum;
+  }
+
   // ---- stroke interpolation ----
 
   _applyStroke(from, to) {
-    const spacing = Math.max(1, this.brushSize * this.spacing);
     const dx = to.x - from.x, dy = to.y - from.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
@@ -623,9 +801,22 @@ export class TileCanvas {
     const useStroke = this._strokeData !== null;
     const imageData = useStroke ? this._strokeData : this.ctx.getImageData(0, 0, this.size, this.size);
 
+    // scatter applies to free-form paint tools where jittering the dab
+    // position is a useful texture knob; clone/line want exact placement
+    // so they get a 0 jitter.
+    const scatterTools = { brush: 1, eraser: 1, smear: 1, blob: 1, spray: 1 };
+    const sAmt = (this.scatter > 0 && scatterTools[this.tool]) ? this.scatter * this.brushSize : 0;
+
+    // when scatter is on, scatterRate widens the spacing so coverage
+    // builds gradually instead of choking the canvas on every drag.
+    const spacingMul = sAmt ? this.scatterRate : 1;
+    const spacing = Math.max(1, this.brushSize * this.spacing * spacingMul);
+
     if (dist === 0) {
       // single point: paint exactly once (no double-application bug)
-      this._applyAtPoint(imageData, from.x, from.y, 0, 0);
+      const jx = sAmt ? (Math.random() - 0.5) * 2 * sAmt : 0;
+      const jy = sAmt ? (Math.random() - 0.5) * 2 * sAmt : 0;
+      this._applyAtPoint(imageData, from.x + jx, from.y + jy, 0, 0);
     } else {
       const steps = Math.max(1, Math.ceil(dist / spacing));
       const invDist = 1 / dist;
@@ -633,8 +824,12 @@ export class TileCanvas {
       const ndy = dy * invDist;
       for (let i = 0; i <= steps; i++) {
         const t = i / steps;
-        const x = from.x + dx * t;
-        const y = from.y + dy * t;
+        let x = from.x + dx * t;
+        let y = from.y + dy * t;
+        if (sAmt) {
+          x += (Math.random() - 0.5) * 2 * sAmt;
+          y += (Math.random() - 0.5) * 2 * sAmt;
+        }
         this._applyAtPoint(imageData, x, y, ndx, ndy);
       }
     }
@@ -668,6 +863,26 @@ export class TileCanvas {
   }
 
   _applyAtPoint(imageData, cx, cy, ndx, ndy) {
+    // spray manages its own wrap+symmetry (toroidal per-dot), so call once
+    if (this.tool === 'spray') {
+      this._paintSpray(imageData, cx, cy);
+      return;
+    }
+
+    // procedural blob: lock one seed so every wraparound copy is the same
+    // silhouette -- otherwise the wrapped half of an edge stamp is a
+    // different random shape and the seam visibly breaks.
+    let blobSeed = null;
+    if (this.tool === 'blob' && !(this.activeStampId && this.stamps.length > 0)) {
+      blobSeed = this.blobVary ? (this._blobSeed++ + 1) : 1337;
+    }
+    // same rule for active stamps with random rotation -- pin the angle once
+    let stampAngleOverride = null;
+    if (this.tool === 'blob' && this.activeStampId && this.stamps.length > 0
+        && this.stampRandomRotate) {
+      stampAngleOverride = Math.random() * Math.PI * 2;
+    }
+
     const positions = this._expandPositions(cx, cy);
     for (const [px, py] of positions) {
       switch (this.tool) {
@@ -677,12 +892,11 @@ export class TileCanvas {
         case 'blob':
           // if an active stamp is selected, use it; otherwise procedural blob
           if (this.activeStampId && this.stamps.length > 0) {
-            this._paintStamp(imageData, px, py);
+            this._paintStamp(imageData, px, py, stampAngleOverride);
           } else {
-            this._paintBlob(imageData, px, py);
+            this._paintBlob(imageData, px, py, blobSeed);
           }
           break;
-        case 'spray':  this._paintSpray(imageData, px, py); break;
         case 'clone':  this._paintClone(imageData, px, py); break;
         case 'line':   this._paintBrush(imageData, px, py, this.color); break;
       }
@@ -698,7 +912,7 @@ export class TileCanvas {
     const h  = this.hardness;
     const op = this.opacity;
     const shape = this.brushShape;
-    const [rc, gc, bc] = eraser ? this.color : color;
+    const [rc, gc, bc] = eraser ? this.color2 : color;
 
     if (shape === 'pixel') {
       const pxI = (cx + 0.5) | 0, pyI = (cy + 0.5) | 0;
@@ -762,7 +976,7 @@ export class TileCanvas {
     const { data, width, height } = imageData;
     const src = this._smearSnap ?? imageData;
     const r   = this.brushSize;
-    const op  = this.opacity * 0.6;
+    const op  = this.opacity;
     const pull = r * 0.4;
 
     const x0 = Math.max(0, Math.ceil(cx - r));
@@ -783,11 +997,7 @@ export class TileCanvas {
         const sy = py - ndy * pull * t;
 
         const [sr, sg, sb] = this._bilinear(src.data, width, height, sx, sy);
-
-        const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - alpha) + sr * alpha);
-        data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + sg * alpha);
-        data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + sb * alpha);
+        this._blendPixel(data, (py * width + px) * 4, sr, sg, sb, alpha);
       }
     }
   }
@@ -819,11 +1029,7 @@ export class TileCanvas {
 
         // sample from source position (toroidal via _bilinear)
         const [sr, sg, sb] = this._bilinear(src.data, width, height, px + odx, py + ody);
-
-        const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - alpha) + sr * alpha);
-        data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + sg * alpha);
-        data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + sb * alpha);
+        this._blendPixel(data, (py * width + px) * 4, sr, sg, sb, alpha);
       }
     }
   }
@@ -833,15 +1039,18 @@ export class TileCanvas {
   // metaball cluster stamp: 1 core + 4-7 satellites, painted where the summed
   // field exceeds a threshold. produces smooth lobed shapes like real woodland
   // camo blobs. replaces angular-noise perturbation which produced spiky stars.
-  _paintBlob(imageData, cx, cy) {
+  // seedOverride lets callers force a specific shape -- needed so wraparound
+  // copies (and layered stamps) keep the same silhouette across the seam.
+  _paintBlob(imageData, cx, cy, seedOverride = null) {
     const { data, width, height } = imageData;
     const r   = this.brushSize;
     const op  = this.opacity;
     const [rc, gc, bc] = this.color;
     const style = this.blobStyle;
 
-    // per-stamp RNG (varies when blobVary is on)
-    let s = this.blobVary ? (this._blobSeed++ + 1) : 1337;
+    let s = seedOverride !== null
+      ? seedOverride
+      : (this.blobVary ? (this._blobSeed++ + 1) : 1337);
     s = s >>> 0;
     const rng = () => { s = (Math.imul(1664525, s) + 1013904223) >>> 0; return s / 0x100000000; };
 
@@ -861,8 +1070,16 @@ export class TileCanvas {
         nSat = 5; spread = 1.0; satSize = 0.70; threshold = 1.55; break;
     }
 
-    // manual perturbation slider scales satellite reach when > 0
-    const reachScale = this.blobScale > 0 ? this.blobScale / Math.max(1, r) : 1.0;
+    // jaggedness: 0 = default geometry, 1 = wider reach + (for jagged style)
+    // fatter spikes. lets the user produce big spiky blobs without having to
+    // crank up brushSize.
+    const jag = Math.max(0, Math.min(1, this.blobJaggedness));
+    spread *= 1 + jag * 1.5;
+    if (style === 'jagged') {
+      satSize *= 1 + jag * 0.6;
+      nSat += Math.round(jag * 3);   // a few more spikes at high jag
+    }
+    const reachScale = 1.0;
     const coreR = r * 0.55;
     const ca = Math.cos(axisAngle), sa = Math.sin(axisAngle);
 
@@ -899,29 +1116,11 @@ export class TileCanvas {
 
     for (let py = y0; py <= y1; py++) {
       for (let px = x0; px <= x1; px++) {
-        let sum = 0;
-        for (let k = 0; k < blobs.length; k++) {
-          const b = blobs[k];
-          const dx = px - b.x, dy = py - b.y;
-          const d2 = dx * dx + dy * dy;
-          const r2 = b.r * b.r;
-          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
-        }
+        const sum = this._metaballSum(px, py, blobs);
         if (sum <= threshold) continue;
-
-        let alpha;
-        if (softBand <= 0) {
-          alpha = op;
-        } else {
-          alpha = Math.min(1, (sum - threshold) / softBand) * op;
-        }
+        const alpha = softBand <= 0 ? op : Math.min(1, (sum - threshold) / softBand) * op;
         if (alpha <= 0) continue;
-
-        const i = (py * width + px) * 4;
-        const inv = 1 - alpha;
-        data[i]     = (data[i]     * inv + rc * alpha) | 0;
-        data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
-        data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+        this._blendPixel(data, (py * width + px) * 4, rc, gc, bc, alpha);
       }
     }
   }
@@ -933,6 +1132,7 @@ export class TileCanvas {
     if (pts.length < 2) return;
     const imageData = this.ctx.getImageData(0, 0, this.size, this.size);
     const { data, width, height } = imageData;
+    const S   = this.size;
     const r   = this.brushSize;
     const op  = this.opacity;
     const [rc, gc, bc] = this.color;
@@ -955,13 +1155,15 @@ export class TileCanvas {
     if (spine.length < 2) spine.push(pts[pts.length - 1]);
 
     // speed-based radii: drawing fast = thinner stroke, slow = thicker.
-    // narrower range than before so even fast strokes still produce blobs big
-    // enough to bridge the spine spacing without gaps.
+    // pathPressure controls how much speed thins the line: 0 = no thinning,
+    // 0.5 = the previous fixed half-thinning, 1 = thins to 15% at peak speed.
     const speeds = spine.map(p => p.speed || 0);
     const maxSpeed = Math.max(1, ...speeds);
+    const press = Math.max(0, Math.min(1, this.pathPressure));
+    const minScale = Math.max(0.15, 1 - press);
     const spineRadii = spine.map(p => {
       const speedNorm = (p.speed || 0) / maxSpeed;
-      return r * (1.0 - speedNorm * 0.5);   // range: 0.5r to 1.0r
+      return r * (1 - speedNorm * (1 - minScale));
     });
     for (let pass = 0; pass < 3; pass++) {
       for (let i = 1; i < spineRadii.length - 1; i++) {
@@ -969,14 +1171,51 @@ export class TileCanvas {
       }
     }
 
-    // chain-of-metaballs along the path. blob r multiplier 0.7 plus tighter
-    // spacing ensures adjacent metaball fields overlap above threshold.
-    const blobs = spine.map((p, i) => ({ x: p.x, y: p.y, r: spineRadii[i] * 0.7 }));
+    // chain-of-metaballs along the path
+    const baseBlobs = spine.map((p, i) => ({ x: p.x, y: p.y, r: spineRadii[i] * 0.7 }));
 
-    const threshold = 1.45;
+    // expand each spine ball into mirror/wrap copies so the path tiles
+    // seamlessly and respects the symmetry toggles.
+    const sym = this.symmetry;
+    const blobs = [];
+    for (const b of baseBlobs) {
+      const bases = [[b.x, b.y]];
+      if (sym.h) bases.push([b.x, S - b.y]);
+      if (sym.v) bases.push([S - b.x, b.y]);
+      if (sym.h && sym.v) bases.push([S - b.x, S - b.y]);
+      for (const [bx, by] of bases) {
+        blobs.push({ x: bx, y: by, r: b.r });
+        // toroidal phantoms when the field reaches off-edge
+        const reach = b.r * 3;
+        const leftWrap  = bx - reach < 0;
+        const rightWrap = bx + reach > S;
+        const topWrap   = by - reach < 0;
+        const botWrap   = by + reach > S;
+        if (leftWrap)  blobs.push({ x: bx + S, y: by, r: b.r });
+        if (rightWrap) blobs.push({ x: bx - S, y: by, r: b.r });
+        if (topWrap)   blobs.push({ x: bx, y: by + S, r: b.r });
+        if (botWrap)   blobs.push({ x: bx, y: by - S, r: b.r });
+        if (leftWrap  && topWrap) blobs.push({ x: bx + S, y: by + S, r: b.r });
+        if (rightWrap && topWrap) blobs.push({ x: bx - S, y: by + S, r: b.r });
+        if (leftWrap  && botWrap) blobs.push({ x: bx + S, y: by - S, r: b.r });
+        if (rightWrap && botWrap) blobs.push({ x: bx - S, y: by - S, r: b.r });
+      }
+    }
+
+    // match click-blob's per-style threshold so a path stroke has the same
+    // edge character as a click stamp of the same style.
+    let threshold;
+    switch (this.blobStyle) {
+      case 'cloud':     threshold = 1.20; break;
+      case 'splat':     threshold = 1.30; break;
+      case 'elongated': threshold = 1.40; break;
+      case 'jagged':    threshold = 1.65; break;
+      default:          threshold = 1.45; break;   // organic
+    }
     const softBand = (1 - this.hardness) * threshold * 0.6;
 
-    // AABB
+    // AABB clamped to canvas; phantoms outside the canvas contribute via the
+    // metaball field even though we don't iterate their pixels directly.
     let ax0 = width, ay0 = height, ax1 = 0, ay1 = 0;
     for (const b of blobs) {
       const reach = b.r * 3;
@@ -992,29 +1231,11 @@ export class TileCanvas {
 
     for (let py = y0; py <= y1; py++) {
       for (let px = x0; px <= x1; px++) {
-        let sum = 0;
-        for (let k = 0; k < blobs.length; k++) {
-          const b = blobs[k];
-          const dx = px - b.x, dy = py - b.y;
-          const d2 = dx * dx + dy * dy;
-          const r2 = b.r * b.r;
-          if (d2 < r2 * 9) sum += r2 / (r2 + d2);
-        }
+        const sum = this._metaballSum(px, py, blobs);
         if (sum <= threshold) continue;
-
-        let alpha;
-        if (softBand <= 0) {
-          alpha = op;
-        } else {
-          alpha = Math.min(1, (sum - threshold) / softBand) * op;
-        }
+        const alpha = softBand <= 0 ? op : Math.min(1, (sum - threshold) / softBand) * op;
         if (alpha <= 0) continue;
-
-        const i = (py * width + px) * 4;
-        const inv = 1 - alpha;
-        data[i]     = (data[i]     * inv + rc * alpha) | 0;
-        data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
-        data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+        this._blendPixel(data, (py * width + px) * 4, rc, gc, bc, alpha);
       }
     }
 
@@ -1315,7 +1536,7 @@ export class TileCanvas {
     }
   }
 
-  _paintStamp(imageData, cx, cy) {
+  _paintStamp(imageData, cx, cy, angleOverride = null) {
     const stamp = this.stamps.find(s => s.id === this.activeStampId);
     if (!stamp) return;
 
@@ -1325,16 +1546,21 @@ export class TileCanvas {
     const op = this.opacity;
     const [rc, gc, bc] = this.color;
 
-    // each stamp call may get a fresh random rotation
-    const angle = this.stampRandomRotate
+    // angleOverride lets the caller pin a stable angle across wraparound
+    // copies so seams don't get mismatched rotations.
+    let angle;
+    if (angleOverride !== null) angle = angleOverride;
+    else angle = this.stampRandomRotate
       ? Math.random() * Math.PI * 2
       : this.stampRotation;
     const cosA = Math.cos(angle), sinA = Math.sin(angle);
 
-    const x0 = Math.max(0, (cx - r) | 0);
-    const x1 = Math.min(width - 1, (cx + r + 1) | 0);
-    const y0 = Math.max(0, (cy - r) | 0);
-    const y1 = Math.min(height - 1, (cy + r + 1) | 0);
+    // rotated stamp reaches up to r*sqrt(2) on the diagonal
+    const reach = r * Math.SQRT2;
+    const x0 = Math.max(0, (cx - reach) | 0);
+    const x1 = Math.min(width - 1, (cx + reach + 1) | 0);
+    const y0 = Math.max(0, (cy - reach) | 0);
+    const y1 = Math.min(height - 1, (cy + reach + 1) | 0);
 
     const stampSize = stamp.size;
     const stampCenter = stampSize / 2;
@@ -1366,78 +1592,156 @@ export class TileCanvas {
 
         const alpha = (a / 255) * op;
         if (alpha <= 0) continue;
-
-        const i = (rowBase + px) * 4;
-        const inv = 1 - alpha;
-        data[i]     = (data[i]     * inv + rc * alpha) | 0;
-        data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
-        data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+        this._blendPixel(data, (rowBase + px) * 4, rc, gc, bc, alpha);
       }
     }
   }
 
   // ---- paint: spray ----
 
+  // toroidal blend of one pixel with optional symmetry mirroring.
+  // x/y can be any integer (negative or beyond canvas); wraps into [0,size).
+  _blendDotTiled(data, S, x, y, rc, gc, bc, alpha) {
+    if (alpha <= 0) return;
+    const sym = this.symmetry;
+    const wx = ((x % S) + S) % S;
+    const wy = ((y % S) + S) % S;
+    const inv = 1 - alpha;
+    let i = (wy * S + wx) * 4;
+    data[i]     = (data[i]     * inv + rc * alpha) | 0;
+    data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
+    data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+    if (sym.h) {
+      const my = ((S - wy) % S + S) % S;
+      i = (my * S + wx) * 4;
+      data[i]     = (data[i]     * inv + rc * alpha) | 0;
+      data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
+      data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+    }
+    if (sym.v) {
+      const mx = ((S - wx) % S + S) % S;
+      i = (wy * S + mx) * 4;
+      data[i]     = (data[i]     * inv + rc * alpha) | 0;
+      data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
+      data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+    }
+    if (sym.h && sym.v) {
+      const my = ((S - wy) % S + S) % S;
+      const mx = ((S - wx) % S + S) % S;
+      i = (my * S + mx) * 4;
+      data[i]     = (data[i]     * inv + rc * alpha) | 0;
+      data[i + 1] = (data[i + 1] * inv + gc * alpha) | 0;
+      data[i + 2] = (data[i + 2] * inv + bc * alpha) | 0;
+    }
+  }
+
+  // spray generates jitter once in canvas space and writes each dot via the
+  // tiled blend helper -- so wraparound and symmetry produce matching pixels
+  // (not independent random samples). this is what makes spray seam-clean.
   _paintSpray(imageData, cx, cy) {
-    const { data, width, height } = imageData;
+    const { data } = imageData;
+    const S   = this.size;
     const r   = this.brushSize;
     const op  = this.opacity;
     const [rc, gc, bc] = this.color;
     const type = this.sprayType;
+    const dMul = this.sprayDensity;     // user density multiplier
+    const fall = this.sprayFalloff;     // 0 = flat, 1 = soft radial falloff
 
     if (type === 'cluster') {
-      const density = Math.round(r * 2);
+      const density = Math.round(r * 2 * dMul);
+      const sigma = r * this.sprayTight;
+      const alpha = op * 0.7;
       for (let k = 0; k < density; k++) {
         const u1 = Math.random(), u2 = Math.random();
-        const mag = r * 0.4 * Math.sqrt(-2 * Math.log(u1 + 0.001));
+        const mag = sigma * Math.sqrt(-2 * Math.log(u1 + 0.001));
+        if (mag > r) continue;
         const angle = Math.PI * 2 * u2;
         const px = Math.round(cx + Math.cos(angle) * mag);
         const py = Math.round(cy + Math.sin(angle) * mag);
-        if (px < 0 || px >= width || py < 0 || py >= height) continue;
-        const d = Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
-        if (d > r) continue;
-        const alpha = op * 0.7;
-        const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - alpha) + rc * alpha);
-        data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + gc * alpha);
-        data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bc * alpha);
+        const a = alpha * (1 - fall * (mag / r));
+        this._blendDotTiled(data, S, px, py, rc, gc, bc, a);
       }
     } else if (type === 'splatter') {
-      const count = Math.round(r * 0.4) + 3;
+      const count = Math.round((r * 0.4 + 3) * dMul);
+      const alpha = op * 0.85;
+      const dotMaxR = Math.max(1, this.sprayDotMax);
       for (let k = 0; k < count; k++) {
         const angle = Math.random() * Math.PI * 2;
         const d = Math.random() * r;
         const dotCx = cx + Math.cos(angle) * d;
         const dotCy = cy + Math.sin(angle) * d;
-        const dotR = 1 + Math.floor(Math.random() * Math.max(1, r * 0.15));
+        const dotR = 1 + Math.floor(Math.random() * dotMaxR);
+        const dotR2 = dotR * dotR;
+        const a = alpha * (1 - fall * 0.5 * (d / r));
 
         for (let dy = -dotR; dy <= dotR; dy++) {
           for (let dx = -dotR; dx <= dotR; dx++) {
-            if (dx * dx + dy * dy > dotR * dotR) continue;
+            if (dx * dx + dy * dy > dotR2) continue;
             const px = Math.round(dotCx + dx);
             const py = Math.round(dotCy + dy);
-            if (px < 0 || px >= width || py < 0 || py >= height) continue;
-            const alpha = op * 0.85;
-            const i = (py * width + px) * 4;
-            data[i]     = Math.round(data[i]     * (1 - alpha) + rc * alpha);
-            data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + gc * alpha);
-            data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bc * alpha);
+            this._blendDotTiled(data, S, px, py, rc, gc, bc, a);
+          }
+        }
+      }
+    } else if (type === 'stipple') {
+      // sparse high-contrast dots scattered at low density -- good for
+      // building texture on top of a base layer (think MARPAT pixels but
+      // hand-placed).
+      const density = Math.round((r * 0.3 + 2) * dMul);
+      for (let k = 0; k < density; k++) {
+        const angle = Math.random() * Math.PI * 2;
+        const d = Math.sqrt(Math.random()) * r;   // uniform disc sample
+        const px = Math.round(cx + Math.cos(angle) * d);
+        const py = Math.round(cy + Math.sin(angle) * d);
+        // dot of size 1-3px
+        const dotR = 1 + (Math.random() < 0.3 ? 1 : 0);
+        const a = op * (1 - fall * (d / r));
+        for (let dy = -dotR; dy <= dotR; dy++) {
+          for (let dx = -dotR; dx <= dotR; dx++) {
+            if (dx * dx + dy * dy > dotR * dotR) continue;
+            this._blendDotTiled(data, S, px + dx, py + dy, rc, gc, bc, a);
+          }
+        }
+      }
+    } else if (type === 'fleck') {
+      // small irregular flecks: 3-6 pixel clusters with mild jitter.
+      // approximates the speckled texture of flecktarn or duck-hunter camo
+      // without needing the heavy metaball machinery.
+      const count = Math.round((r * 0.25 + 2) * dMul);
+      const jit = this.sprayFleckJit;
+      for (let k = 0; k < count; k++) {
+        const angle = Math.random() * Math.PI * 2;
+        const d = Math.sqrt(Math.random()) * r;
+        const fcx = cx + Math.cos(angle) * d;
+        const fcy = cy + Math.sin(angle) * d;
+        const a = op * (1 - fall * (d / r));
+        // 3-5 pixel sub-cluster forming an irregular blob
+        const subCount = 3 + Math.floor(Math.random() * 3);
+        const subR = 1 + Math.random() * 2;
+        for (let j = 0; j < subCount; j++) {
+          const sa = Math.random() * Math.PI * 2;
+          const sd = Math.random() * subR * (1 + jit * 0.8);
+          const fpx = Math.round(fcx + Math.cos(sa) * sd);
+          const fpy = Math.round(fcy + Math.sin(sa) * sd);
+          this._blendDotTiled(data, S, fpx, fpy, rc, gc, bc, a);
+          // optional second pixel adjacent for shape variation
+          if (Math.random() < jit) {
+            this._blendDotTiled(data, S, fpx + 1, fpy, rc, gc, bc, a);
+            this._blendDotTiled(data, S, fpx, fpy + 1, rc, gc, bc, a);
           }
         }
       }
     } else {
-      const density = Math.round(r * 1.5);
+      // uniform
+      const density = Math.round(r * 1.5 * dMul);
       for (let k = 0; k < density; k++) {
         const angle = Math.random() * Math.PI * 2;
         const d     = Math.random() * r;
         const px = Math.round(cx + Math.cos(angle) * d);
         const py = Math.round(cy + Math.sin(angle) * d);
-        if (px < 0 || px >= width || py < 0 || py >= height) continue;
-        const alpha = op * (1 - d / r);
-        const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - alpha) + rc * alpha);
-        data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + gc * alpha);
-        data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bc * alpha);
+        const a = op * (1 - fall * (d / r));
+        this._blendDotTiled(data, S, px, py, rc, gc, bc, a);
       }
     }
   }
@@ -1480,11 +1784,7 @@ export class TileCanvas {
           }
 
           if (alpha <= 0) continue;
-          alpha = Math.min(1, alpha);
-          const i = (py * width + px) * 4;
-          data[i]     = Math.round(data[i]     * (1 - alpha) + rc * alpha);
-          data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + gc * alpha);
-          data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bc * alpha);
+          this._blendPixel(data, (py * width + px) * 4, rc, gc, bc, Math.min(1, alpha));
         }
       }
     } else {
@@ -1514,11 +1814,7 @@ export class TileCanvas {
           }
 
           if (alpha <= 0) continue;
-          alpha = Math.min(1, alpha);
-          const i = (py * width + px) * 4;
-          data[i]     = Math.round(data[i]     * (1 - alpha) + rc * alpha);
-          data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + gc * alpha);
-          data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bc * alpha);
+          this._blendPixel(data, (py * width + px) * 4, rc, gc, bc, Math.min(1, alpha));
         }
       }
     }
@@ -1542,15 +1838,10 @@ export class TileCanvas {
       for (let px = 0; px < width; px++) {
         const pdx = px - start.x, pdy = py - start.y;
         const t = len2 > 0 ? Math.max(0, Math.min(1, (pdx * dx + pdy * dy) / len2)) : 0;
-
         const cr = r1 + (r2 - r1) * t;
         const cg = g1 + (g2 - g1) * t;
         const cb = b1 + (b2 - b1) * t;
-
-        const i = (py * width + px) * 4;
-        data[i]     = Math.round(data[i]     * (1 - op) + cr * op);
-        data[i + 1] = Math.round(data[i + 1] * (1 - op) + cg * op);
-        data[i + 2] = Math.round(data[i + 2] * (1 - op) + cb * op);
+        this._blendPixel(data, (py * width + px) * 4, cr, cg, cb, op);
       }
     }
 
@@ -1674,7 +1965,7 @@ export class TileCanvas {
 
     if (tr === fr && tg === fg && tb === fb) return;
 
-    const tol = 30;
+    const tol = this.fillTolerance;
     const visited = new Uint8Array(width * height);
     const stack = [px + py * width];
 

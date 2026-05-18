@@ -9,7 +9,7 @@ export const PATTERN_PRESETS = {
     palette: 'woodland',
     params: {
       'ct-scale': 1.6, 'ct-stretch': 2.2, 'ct-warp': 0.9,
-      'ct-sharpness': 0.90, 'ct-coverage': 0.55, 'ct-puzzle': 1,
+      'ct-sharpness': 1.0, 'ct-coverage': 0.55, 'ct-puzzle': 1,
     },
   },
   dpm: {
@@ -50,7 +50,7 @@ export const PATTERN_PRESETS = {
     palette: 'denison',
     params: {
       'ct-scale': 1.5, 'ct-stretch': 2.5, 'ct-warp': 1.2,
-      'ct-sharpness': 0.75, 'ct-coverage': 0.55, 'ct-puzzle': 1,
+      'ct-sharpness': 1.0, 'ct-coverage': 0.55, 'ct-puzzle': 1,
     },
   },
   lizard: {
@@ -59,7 +59,7 @@ export const PATTERN_PRESETS = {
     palette: 'lizard',
     params: {
       'ct-scale': 2.5, 'ct-stretch': 3.0, 'ct-warp': 0.7,
-      'ct-sharpness': 0.90, 'ct-coverage': 0.50, 'ct-puzzle': 1,
+      'ct-sharpness': 1.0, 'ct-coverage': 0.50, 'ct-puzzle': 1,
     },
   },
 
@@ -140,7 +140,7 @@ export const PATTERN_PRESETS = {
     palette: 'desert6',
     params: {
       'chip-blobs': 12, 'chip-blob-min': 0.06, 'chip-blob-max': 0.16,
-      'chip-count': 180, 'chip-size': 5, 'gen-softness': 0.20,
+      'chip-count': 180, 'chip-size': 5, 'gen-softness': 0,
     },
   },
   // ---- novelty / viral ----
@@ -161,7 +161,7 @@ export const PATTERN_PRESETS = {
     palette: 'volcano',
     params: {
       'blob-count': 30, 'blob-min': 0.03, 'blob-max': 0.22,
-      'gen-softness': 0.30, 'blob-noise': 0.80,
+      'gen-softness': 0, 'blob-noise': 0.80,
     },
   },
   zombie: {
@@ -187,7 +187,7 @@ export const PATTERN_PRESETS = {
     palette: 'kryptek_typhon',
     params: {
       'seed-count': 24, 'gen-scale': 1.2,
-      'gen-softness': 0.15, 'gen-border': 0.60,
+      'gen-softness': 0, 'gen-border': 0.60,
     },
   },
   kryptek_ocean: {
@@ -196,7 +196,7 @@ export const PATTERN_PRESETS = {
     palette: 'kryptek_neptune',
     params: {
       'seed-count': 20, 'gen-scale': 1.0,
-      'gen-softness': 0.20, 'gen-border': 0.55,
+      'gen-softness': 0, 'gen-border': 0.55,
     },
   },
   carbon_black: {

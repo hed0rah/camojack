@@ -33,6 +33,7 @@ const state = {
   activeIdx:   0,
   activeRgb:   [74, 103, 65],
   activeRgb2:  [40, 30, 20],   // secondary color
+  activeSlot:  'primary',      // which color slot the swatches/sliders edit
   generator:   'voronoi',
   seed:        1337,
   tileCanvas:  null,
@@ -46,6 +47,7 @@ const state = {
 export function initUI(tc) {
   state.tileCanvas = tc;
 
+  setupTheme();
   setupToolbar();
   setupGeneratorPanel();
   setupPresetPanel();
@@ -60,7 +62,9 @@ export function initUI(tc) {
   setupExport();
 
   tc.onColorPick = (rgb, hex) => {
-    state.activeRgb = rgb;
+    // eyedropper drops into whichever slot is active
+    if (state.activeSlot === 'primary') state.activeRgb  = rgb;
+    else                                state.activeRgb2 = rgb;
     applyColorToUI(rgb);
   };
 
@@ -82,8 +86,34 @@ export function initUI(tc) {
     document.getElementById('brush-hardness-val').textContent = Math.round(hardness * 100) + '%';
   };
 
+  // show only the active tool's panel sections (universal controls stay)
+  syncToolPanelVisibility(state.tool);
+
   // random algo + palette + seed on load
   randomizeAll();
+}
+
+// ---- theme ----
+
+function setupTheme() {
+  const stored = (() => {
+    try { return localStorage.getItem('camojack:theme'); } catch { return null; }
+  })();
+  applyTheme(stored === 'light' ? 'light' : 'dark');
+
+  const btn = document.getElementById('btn-theme');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+    try { localStorage.setItem('camojack:theme', next); } catch {}
+  });
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const btn = document.getElementById('btn-theme');
+  if (btn) btn.textContent = theme === 'light' ? 'Dark' : 'Light';
 }
 
 // ---- toolbar ----
@@ -118,6 +148,8 @@ function setupToolbar() {
 
   document.getElementById('btn-undo').addEventListener('click', () => state.tileCanvas.undo());
   document.getElementById('btn-redo').addEventListener('click', () => state.tileCanvas.redo());
+  const btnInvert = document.getElementById('btn-invert');
+  if (btnInvert) btnInvert.addEventListener('click', () => state.tileCanvas.invert());
 
   document.getElementById('tile-size-sel').addEventListener('change', e => {
     const s = parseInt(e.target.value);
@@ -128,12 +160,26 @@ function setupToolbar() {
 
 // cached on first call
 let _toolBtns = null;
+let _toolSections = null;
 function setTool(tool) {
   state.tool = tool;
   state.tileCanvas.setTool(tool);
   if (!_toolBtns) _toolBtns = document.querySelectorAll('.tool-btn');
   for (let i = 0; i < _toolBtns.length; i++) {
     _toolBtns[i].classList.toggle('active', _toolBtns[i].dataset.tool === tool);
+  }
+  syncToolPanelVisibility(tool);
+}
+
+// each tool-specific section declares data-show-for="tool1 tool2 ...".
+// universal controls (size/opacity/hardness/spacing/symmetry) live outside
+// any .tool-section and are always visible.
+function syncToolPanelVisibility(tool) {
+  if (!_toolSections) _toolSections = document.querySelectorAll('.tool-section');
+  for (let i = 0; i < _toolSections.length; i++) {
+    const sec = _toolSections[i];
+    const tools = (sec.dataset.showFor || '').split(/\s+/);
+    sec.hidden = !tools.includes(tool);
   }
 }
 
@@ -143,13 +189,34 @@ function swapColors() {
   const tmp = state.activeRgb;
   state.activeRgb = [...state.activeRgb2];
   state.activeRgb2 = [...tmp];
-  applyColorToUI(state.activeRgb);
-  updateColor2Preview();
+  // both previews swap visually; active slot stays the same
+  document.getElementById('color-preview').style.background  = '#' + rgbToHex(state.activeRgb);
+  document.getElementById('color2-preview').style.background = '#' + rgbToHex(state.activeRgb2);
+  // refresh sliders to whichever slot is active now
+  const activeRgb = state.activeSlot === 'primary' ? state.activeRgb : state.activeRgb2;
+  refreshSliders(activeRgb);
 }
 
-function updateColor2Preview() {
-  const el = document.getElementById('color2-preview');
-  if (el) el.style.background = '#' + rgbToHex(state.activeRgb2);
+// switch which color slot the HSL / hex / palette-click controls edit.
+// just updates state + visual outline -- doesn't mutate any color.
+function setActiveSlot(slot) {
+  state.activeSlot = slot;
+  document.querySelectorAll('.color-slot').forEach(el => {
+    el.classList.toggle('active', el.dataset.slot === slot);
+  });
+  const rgb = slot === 'primary' ? state.activeRgb : state.activeRgb2;
+  refreshSliders(rgb);
+}
+
+// update the hex input and HSL sliders to reflect a given color without
+// mutating either slot (used after slot switches and swap).
+function refreshSliders(rgb) {
+  const hex = rgbToHex(rgb);
+  const [h, s, l] = rgbToHsl(rgb);
+  $('hex-input').value = hex.toUpperCase();
+  $('hue-sl').value = h;  $('hue-val').textContent = h;
+  $('sat-sl').value = s;  $('sat-val').textContent = s;
+  $('lit-sl').value = l;  $('lit-val').textContent = l;
 }
 
 // ---- generator panel ----
@@ -157,18 +224,18 @@ function updateColor2Preview() {
 const PARAM_DEFS = {
   voronoi: [
     { id: 'seed-count',    label: 'Seeds',    min: 2,    max: 64,   value: 12,  step: 1    },
-    { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 5,    value: 1.0, step: 0.05 },
+    { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 3,    value: 1.0, step: 0.05 },
     { id: 'gen-softness',  label: 'Softness', min: 0,    max: 1,    value: 0,   step: 0.05 },
     { id: 'gen-border',    label: 'Border',   min: 0,    max: 1,    value: 0,   step: 0.05 },
   ],
   noise: [
-    { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 16,   value: 2.5, step: 0.1  },
+    { id: 'gen-scale',     label: 'Scale',    min: 0.2,  max: 5,    value: 1.5, step: 0.1  },
     { id: 'gen-octaves',   label: 'Octaves',  min: 1,    max: 10,   value: 5,   step: 1    },
     { id: 'gen-warp',      label: 'Warp',     min: 0,    max: 6,    value: 1.8, step: 0.1  },
   ],
   digital: [
     { id: 'gen-cell',      label: 'Cell px',  min: 1,    max: 40,   value: 5,   step: 1    },
-    { id: 'gen-scale',     label: 'Scale',    min: 0.5,  max: 16,   value: 3.5, step: 0.5  },
+    { id: 'gen-scale',     label: 'Scale',    min: 0.5,  max: 6,    value: 2.5, step: 0.1  },
     { id: 'gen-octaves',   label: 'Octaves',  min: 1,    max: 8,    value: 3,   step: 1    },
   ],
   blotch: [
@@ -249,7 +316,7 @@ const PARAM_DEFS = {
     { id: 'cf-noise',      label: 'Noise',    min: 0,    max: 0.3,  value: 0,   step: 0.01 },
   ],
   contour: [
-    { id: 'ct-scale',      label: 'Scale',    min: 0.5,  max: 6,    value: 1.8, step: 0.1  },
+    { id: 'ct-scale',      label: 'Scale',    min: 0.5,  max: 3.5,  value: 1.5, step: 0.1  },
     { id: 'ct-stretch',    label: 'Stretch',  min: 0.5,  max: 5,    value: 2.0, step: 0.1  },
     { id: 'ct-warp',       label: 'Warp',     min: 0,    max: 3,    value: 0.8, step: 0.1  },
     { id: 'ct-sharpness',  label: 'Sharpness',min: 0,    max: 1,    value: 1.0, step: 0.05 },
@@ -413,13 +480,13 @@ function runGenerator() {
 
   switch (state.generator) {
     case 'voronoi':
-      generateVoronoi(ctx, sz, pal, { seedCount: getParam('seed-count', 12)|0, scale: getParam('gen-scale', 1.0), softness: getParam('gen-softness', 0.25), border: getParam('gen-border', 0.35), seed }); break;
+      generateVoronoi(ctx, sz, pal, { seedCount: getParam('seed-count', 12)|0, scale: getParam('gen-scale', 1.0), softness: getParam('gen-softness', 0), border: getParam('gen-border', 0), seed }); break;
     case 'noise':
       generateNoise(ctx, sz, pal, { scale: getParam('gen-scale', 2.5), octaves: getParam('gen-octaves', 5)|0, warpStrength: getParam('gen-warp', 1.8), tileable, seed }); break;
     case 'digital':
       generateDigital(ctx, sz, pal, { cellSize: getParam('gen-cell', 5)|0, scale: getParam('gen-scale', 3.5), octaves: getParam('gen-octaves', 3)|0, tileable, seed }); break;
     case 'blotch':
-      generateBlotch(ctx, sz, pal, { count: getParam('blob-count', 20)|0, minSize: getParam('blob-min', 0.04), maxSize: getParam('blob-max', 0.18), softness: getParam('gen-softness', 0.25), blobNoise: getParam('blob-noise', 0.60), seed }); break;
+      generateBlotch(ctx, sz, pal, { count: getParam('blob-count', 20)|0, minSize: getParam('blob-min', 0.04), maxSize: getParam('blob-max', 0.18), softness: getParam('gen-softness', 0), blobNoise: getParam('blob-noise', 0.60), seed }); break;
     case 'metaball':
       generateMetaball(ctx, sz, pal, { clusters: getParam('mb-clusters', 18)|0, coreRadius: getParam('mb-core', 0.08), satellites: getParam('mb-satellites', 5)|0, spread: getParam('mb-spread', 0.9), satSize: getParam('mb-sat-size', 0.65), threshold: getParam('mb-threshold', 1.5), softness: getParam('gen-softness', 0), bgIdx: getParam('mb-bg', 0)|0, accentClusters: getParam('mb-accent', 0)|0, accentCore: getParam('mb-accent-core', 0.04), accentThreshold: getParam('mb-accent-thr', 1.7), seed }); break;
     case 'stripe':
@@ -431,7 +498,7 @@ function runGenerator() {
     case 'rain':
       generateRain(ctx, sz, pal, { dashCount: getParam('rain-count', 300)|0, dashWidth: getParam('rain-width', 3)|0, dashMinH: getParam('rain-min-h', 15)|0, dashMaxH: getParam('rain-max-h', 50)|0, angleVar: getParam('rain-angle', 8), seed }); break;
     case 'chip':
-      generateChip(ctx, sz, pal, { blobCount: getParam('chip-blobs', 12)|0, blobMin: getParam('chip-blob-min', 0.06), blobMax: getParam('chip-blob-max', 0.16), chipCount: getParam('chip-count', 180)|0, chipSize: getParam('chip-size', 5)|0, softness: getParam('gen-softness', 0.20), shadow: getParam('chip-shadow', 0.40), seed }); break;
+      generateChip(ctx, sz, pal, { blobCount: getParam('chip-blobs', 12)|0, blobMin: getParam('chip-blob-min', 0.06), blobMax: getParam('chip-blob-max', 0.16), chipCount: getParam('chip-count', 180)|0, chipSize: getParam('chip-size', 5)|0, softness: getParam('gen-softness', 0), shadow: getParam('chip-shadow', 0.40), seed }); break;
     case 'geometric':
       generateGeometric(ctx, sz, pal, { cellCount: getParam('geo-cells', 18)|0, angularity: getParam('geo-angular', 0.50), scale: getParam('gen-scale', 1.0), seed }); break;
     case 'honeycomb':
@@ -439,7 +506,7 @@ function runGenerator() {
     case 'carbon':
       generateCarbon(ctx, sz, pal, { weaveSize: getParam('cf-weave', 8)|0, depth: getParam('cf-depth', 0.40), glossy: getParam('cf-gloss', 0.20), noise: getParam('cf-noise', 0.08), tileable, seed }); break;
     case 'contour':
-      generateContour(ctx, sz, pal, { scale: getParam('ct-scale', 1.8), stretch: getParam('ct-stretch', 2.0), warp: getParam('ct-warp', 0.8), sharpness: getParam('ct-sharpness', 0.85), coverage: getParam('ct-coverage', 0.45), puzzle: getParam('ct-puzzle', 0), tileable, seed }); break;
+      generateContour(ctx, sz, pal, { scale: getParam('ct-scale', 1.8), stretch: getParam('ct-stretch', 2.0), warp: getParam('ct-warp', 0.8), sharpness: getParam('ct-sharpness', 1.0), coverage: getParam('ct-coverage', 0.45), puzzle: getParam('ct-puzzle', 0), tileable, seed }); break;
   }
 
   tc.updatePreview();
@@ -840,17 +907,29 @@ function setupPalettePanel() {
     const hex = hexIn.value.replace(/[^0-9a-fA-F]/g, '').padEnd(6, '0').slice(0, 6);
     hexIn.value = hex.toUpperCase();
     const rgb = hexToRgb(hex);
-    state.activeRgb = rgb;
-    applyColorToUI(rgb, true);
-    commitSwatchColor(hex);
+    if (state.activeSlot === 'primary') {
+      state.activeRgb = rgb;
+      applyColorToUI(rgb, true);
+      commitSwatchColor(hex);
+    } else {
+      state.activeRgb2 = rgb;
+      applyColorToUI(rgb, true);
+    }
   });
 
   // swap colors button
   const swapBtn = document.getElementById('btn-swap-colors');
   if (swapBtn) swapBtn.addEventListener('click', swapColors);
 
-  // set initial color2 preview
-  updateColor2Preview();
+  // clicking either color swatch makes it the active slot (sliders /
+  // hex / palette clicks edit that slot until you click the other one).
+  document.querySelectorAll('.color-slot').forEach(el => {
+    el.addEventListener('click', () => setActiveSlot(el.dataset.slot));
+  });
+
+  // initialize both swatch previews from state
+  document.getElementById('color-preview').style.background  = '#' + rgbToHex(state.activeRgb);
+  document.getElementById('color2-preview').style.background = '#' + rgbToHex(state.activeRgb2);
 }
 
 function renderSwatches() {
@@ -861,16 +940,19 @@ function renderSwatches() {
     const sw = document.createElement('div');
     sw.className = 'swatch' + (idx === state.activeIdx ? ' active' : '');
     sw.style.background = '#' + hex;
-    sw.title = '#' + hex.toUpperCase();
+    sw.title = '#' + hex.toUpperCase() + ' (click = active slot; right-click = inactive slot)';
+    // left click sets the currently-active slot.
+    // alt-click or right-click sets the inactive slot without changing focus.
     sw.addEventListener('click', (e) => {
       if (e.altKey) {
-        // alt+click sets secondary color
-        state.activeRgb2 = hexToRgb(hex);
-        state.tileCanvas.setColor2(state.activeRgb2);
-        updateColor2Preview();
+        setInactiveSlot(hex);
       } else {
         setActiveSwatch(idx);
       }
+    });
+    sw.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      setInactiveSlot(hex);
     });
     sw.addEventListener('dblclick', () => {
       const input = document.createElement('input');
@@ -885,7 +967,7 @@ function renderSwatches() {
         PALETTES.custom.colors = [...state.palette];
         document.getElementById('palette-preset').value = 'custom';
         sw.style.background = '#' + newHex;
-        if (idx === state.activeIdx) {
+        if (idx === state.activeIdx && state.activeSlot === 'primary') {
           state.activeRgb = hexToRgb(newHex);
           applyColorToUI(state.activeRgb);
         }
@@ -896,16 +978,40 @@ function renderSwatches() {
   });
 }
 
-function setActiveSwatch(idx) {
-  state.activeIdx = idx;
-  const swatches = $('palette-swatches').children;
-  for (let i = 0; i < swatches.length; i++) {
-    swatches[i].classList.toggle('active', i === idx);
+// write a hex color into whichever slot is NOT currently active. used by
+// right-click and alt-click on palette swatches so the user can stock the
+// secondary color without losing focus.
+function setInactiveSlot(hex) {
+  const rgb = hexToRgb(hex);
+  if (state.activeSlot === 'primary') {
+    state.activeRgb2 = rgb;
+    state.tileCanvas.setColor2(rgb);
+    $('color2-preview').style.background = '#' + hex;
+  } else {
+    state.activeRgb = rgb;
+    state.tileCanvas.setColor(rgb);
+    $('color-preview').style.background = '#' + hex;
   }
+}
+
+// set the active slot to a palette entry. only primary tracks activeIdx
+// (the palette pointer for the "edit this swatch when sliders move" flow);
+// when secondary is active, palette state is left untouched.
+function setActiveSwatch(idx) {
   const hex = state.palette[idx];
-  state.activeRgb = hexToRgb(hex);
-  applyColorToUI(state.activeRgb);
-  state.tileCanvas.setColor(state.activeRgb);
+  const rgb = hexToRgb(hex);
+
+  if (state.activeSlot === 'primary') {
+    state.activeIdx = idx;
+    const swatches = $('palette-swatches').children;
+    for (let i = 0; i < swatches.length; i++) {
+      swatches[i].classList.toggle('active', i === idx);
+    }
+    state.activeRgb = rgb;
+  } else {
+    state.activeRgb2 = rgb;
+  }
+  applyColorToUI(rgb);
 }
 
 function onHslChange() {
@@ -917,11 +1023,19 @@ function onHslChange() {
   $('lit-val').textContent = l;
 
   const rgb = hslToRgb([h, s, l]);
-  state.activeRgb = rgb;
   const hex = rgbToHex(rgb);
-  $('color-preview').style.background = '#' + hex;
-  $('hex-input').value = hex.toUpperCase();
-  commitSwatchColor(hex);
+
+  if (state.activeSlot === 'primary') {
+    state.activeRgb = rgb;
+    $('color-preview').style.background = '#' + hex;
+    $('hex-input').value = hex.toUpperCase();
+    commitSwatchColor(hex);   // primary edits live-update palette[activeIdx]
+  } else {
+    state.activeRgb2 = rgb;
+    state.tileCanvas.setColor2(rgb);
+    $('color2-preview').style.background = '#' + hex;
+    $('hex-input').value = hex.toUpperCase();
+  }
 }
 
 function commitSwatchColor(hex) {
@@ -937,11 +1051,19 @@ function commitSwatchColor(hex) {
   state.tileCanvas.setColor(state.activeRgb);
 }
 
+// update the preview swatch + hex/HSL inputs for whichever slot is
+// currently active, and push the color to the tile canvas as that slot.
 function applyColorToUI(rgb, skipHex = false) {
   const hex = rgbToHex(rgb);
   const [h, s, l] = rgbToHsl(rgb);
 
-  $('color-preview').style.background = '#' + hex;
+  if (state.activeSlot === 'primary') {
+    $('color-preview').style.background = '#' + hex;
+    state.tileCanvas.setColor(rgb);
+  } else {
+    $('color2-preview').style.background = '#' + hex;
+    state.tileCanvas.setColor2(rgb);
+  }
   if (!skipHex) $('hex-input').value = hex.toUpperCase();
 
   $('hue-sl').value = h;
@@ -950,8 +1072,6 @@ function applyColorToUI(rgb, skipHex = false) {
   $('hue-val').textContent = h;
   $('sat-val').textContent = s;
   $('lit-val').textContent = l;
-
-  state.tileCanvas.setColor(rgb);
 }
 
 // ---- brush panel ----
@@ -983,15 +1103,31 @@ function setupBrushPanel() {
     tc.setBlobPath(mode === 'path');
     tc.setBlobSingle(mode === 'single');
     tc.setBlobLayered(mode === 'layered');
+    syncBlobSubrows(mode);
   });
+  syncBlobSubrows(document.getElementById('blob-mode').value);
 
-  const perturbSl = document.getElementById('blob-perturb');
-  const perturbVal = document.getElementById('blob-perturb-val');
-  perturbSl.addEventListener('input', () => {
-    const v = parseInt(perturbSl.value);
-    state.tileCanvas.setBlobScale(v);
-    perturbVal.textContent = v === 0 ? 'auto' : v;
-  });
+  const jagSl  = document.getElementById('blob-jaggedness');
+  const jagVal = document.getElementById('blob-jaggedness-val');
+  if (jagSl && jagVal) {
+    jagSl.addEventListener('input', () => {
+      const v = parseInt(jagSl.value);
+      state.tileCanvas.setBlobJaggedness(v / 100);
+      jagVal.textContent = v === 0 ? 'default' : '+' + v + '%';
+    });
+  }
+
+  const pressSl  = document.getElementById('blob-pressure');
+  const pressVal = document.getElementById('blob-pressure-val');
+  if (pressSl && pressVal) {
+    pressSl.addEventListener('input', () => {
+      const v = parseInt(pressSl.value);
+      state.tileCanvas.setPathPressure(v / 100);
+      pressVal.textContent = v + '%';
+    });
+  }
+
+  setupSprayPanel();
 
   // shape mode (rect/ellipse)
   const shapeSel = document.getElementById('shape-mode');
@@ -1034,6 +1170,34 @@ function setupBrushPanel() {
     state.tileCanvas.setSpacing(v / 100);
   });
 
+  const scatterSl = document.getElementById('brush-scatter');
+  if (scatterSl) {
+    scatterSl.addEventListener('input', () => {
+      const v = parseInt(scatterSl.value);
+      document.getElementById('brush-scatter-val').textContent = v + '%';
+      state.tileCanvas.setScatter(v / 100);
+    });
+  }
+
+  const scatterRateSl = document.getElementById('brush-scatter-rate');
+  if (scatterRateSl) {
+    scatterRateSl.addEventListener('input', () => {
+      const v = parseInt(scatterRateSl.value);
+      const mul = v / 100;
+      document.getElementById('brush-scatter-rate-val').textContent = mul.toFixed(1) + 'x';
+      state.tileCanvas.setScatterRate(mul);
+    });
+  }
+
+  const fillSl = document.getElementById('fill-tolerance');
+  if (fillSl) {
+    fillSl.addEventListener('input', () => {
+      const v = parseInt(fillSl.value);
+      document.getElementById('fill-tolerance-val').textContent = v;
+      state.tileCanvas.setFillTolerance(v);
+    });
+  }
+
   document.getElementById('sym-h').addEventListener('change', updateSymmetry);
   document.getElementById('sym-v').addEventListener('change', updateSymmetry);
 }
@@ -1042,6 +1206,55 @@ function updateSymmetry() {
   const h = document.getElementById('sym-h').checked;
   const v = document.getElementById('sym-v').checked;
   state.tileCanvas.setSymmetry(h, v);
+}
+
+// ---- spray panel ----
+
+// each spray type wants a different parameter; show/hide subrows so the
+// user only sees what's relevant. always-shown: density + falloff.
+function setupSprayPanel() {
+  const tc = state.tileCanvas;
+  const typeSel = document.getElementById('spray-type');
+
+  const wire = (slId, valId, setter, fmt) => {
+    const sl  = document.getElementById(slId);
+    const val = document.getElementById(valId);
+    if (!sl || !val) return;
+    sl.addEventListener('input', () => {
+      const v = parseInt(sl.value);
+      setter(v);
+      val.textContent = fmt(v);
+    });
+  };
+
+  wire('spray-density',  'spray-density-val',  v => tc.setSprayDensity(v / 100), v => v + '%');
+  wire('spray-falloff',  'spray-falloff-val',  v => tc.setSprayFalloff(v / 100), v => v + '%');
+  wire('spray-tight',    'spray-tight-val',    v => tc.setSprayTight(v / 100),   v => v + '%');
+  wire('spray-dotmax',   'spray-dotmax-val',   v => tc.setSprayDotMax(v),        v => String(v));
+  wire('spray-fleckjit', 'spray-fleckjit-val', v => tc.setSprayFleckJit(v / 100),v => v + '%');
+
+  if (typeSel) {
+    typeSel.addEventListener('change', () => syncSpraySubrows(typeSel.value));
+    syncSpraySubrows(typeSel.value);
+  }
+}
+
+function syncBlobSubrows(mode) {
+  document.querySelectorAll('.blob-path-only').forEach(el => el.hidden = mode !== 'path');
+}
+
+function syncSpraySubrows(type) {
+  const map = {
+    cluster:  '.spray-cluster-only',
+    splatter: '.spray-splatter-only',
+    fleck:    '.spray-fleck-only',
+  };
+  for (const sel of Object.values(map)) {
+    document.querySelectorAll(sel).forEach(el => el.hidden = true);
+  }
+  if (map[type]) {
+    document.querySelectorAll(map[type]).forEach(el => el.hidden = false);
+  }
 }
 
 // ---- stamp library ----

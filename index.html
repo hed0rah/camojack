@@ -41,9 +41,11 @@
         <div class="toolbar-sep"></div>
         <button id="btn-undo" title="Undo [Ctrl+Z]">Undo</button>
         <button id="btn-redo" title="Redo [Ctrl+Y]">Redo</button>
+        <button id="btn-invert" title="Invert canvas colors (255 - RGB)">Invert</button>
       </div>
 
       <div id="topbar-right">
+        <button id="btn-theme" title="Toggle light/dark theme">Light</button>
         <label class="inline-label">Tile</label>
         <select id="tile-size-sel">
           <option value="256">256</option>
@@ -256,6 +258,21 @@
               <option value="zombie">Zombie</option>
               <option value="dragon">Dragon Red</option>
             </optgroup>
+            <optgroup label="Brand">
+              <option value="brand_cocacola">Coca-Cola</option>
+              <option value="brand_mcdonalds">McDonald's</option>
+              <option value="brand_patriot">Patriot (USA)</option>
+              <option value="brand_pepsi">Pepsi</option>
+              <option value="brand_mtndew">Mountain Dew</option>
+              <option value="brand_doritos">Doritos</option>
+              <option value="brand_pringles">Pringles</option>
+              <option value="brand_fedex">FedEx</option>
+              <option value="brand_ups">UPS</option>
+              <option value="brand_starbucks">Starbucks</option>
+              <option value="brand_usps">USPS</option>
+              <option value="brand_harley">Harley-Davidson</option>
+              <option value="brand_barbie">Barbie</option>
+            </optgroup>
             <optgroup label="Biome">
               <option value="biome_temperate">Temperate Forest</option>
               <option value="biome_boreal">Boreal / Conifer</option>
@@ -304,9 +321,9 @@
 
         <div class="section-title section-gap">ACTIVE COLOR</div>
         <div id="color-preview-wrap">
-          <div id="color-preview"></div>
-          <div id="color2-preview" title="Secondary color (Alt+click swatch, X to swap)"></div>
-          <button id="btn-swap-colors" title="Swap colors [X]">X</button>
+          <div id="color-preview" class="color-slot active" data-slot="primary" title="Primary color -- click to activate"></div>
+          <button id="btn-swap-colors" title="Swap primary &harr; secondary [X]">&#x21C4;</button>
+          <div id="color2-preview" class="color-slot" data-slot="secondary" title="Secondary color -- click to activate. Right-click any palette swatch to set this."></div>
           <div id="hex-row">
             <span class="hex-hash">#</span>
             <input type="text" id="hex-input" maxlength="6" spellcheck="false">
@@ -331,92 +348,144 @@
           </div>
         </div>
 
-        <div class="section-title section-gap">BRUSH</div>
-        <div class="form-row">
-          <label>Tip</label>
-          <select id="brush-shape">
-            <option value="circle">Circle</option>
-            <option value="square">Square</option>
-            <option value="pixel">Pixel (1px)</option>
-          </select>
+        <div class="tool-section" data-show-for="brush eraser line">
+          <div class="section-title section-gap">BRUSH TIP</div>
+          <div class="form-row">
+            <label>Tip</label>
+            <select id="brush-shape">
+              <option value="circle">Circle</option>
+              <option value="square">Square</option>
+              <option value="pixel">Pixel (1px)</option>
+            </select>
+          </div>
         </div>
 
-        <div class="section-title section-gap">BLOB TOOL</div>
-        <div class="form-row">
-          <label>Style</label>
-          <select id="blob-style" title="Blob edge character">
-            <option value="organic">Organic</option>
-            <option value="jagged">Jagged</option>
-            <option value="cloud">Cloud</option>
-            <option value="splat">Splat</option>
-            <option value="elongated">Elongated</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label>Action</label>
-          <select id="blob-mode" title="How the blob is applied">
-            <option value="paint">Paint (drag)</option>
-            <option value="single">Single click</option>
-            <option value="layered">Layered click</option>
-            <option value="path">Path (drag)</option>
-          </select>
-        </div>
-        <div class="check-row blob-vary-row">
-          <label class="chk-label" title="Each blob is a unique random shape"><input type="checkbox" id="blob-vary" checked> Vary shapes</label>
-        </div>
-        <div class="slider-row">
-          <label title="Edge jaggedness in pixels (0 = auto-scales with size)">Jag px</label>
-          <div class="slider-track"><input type="range" id="blob-perturb" min="0" max="200" value="0"></div>
-          <span class="sl-val" id="blob-perturb-val">auto</span>
-        </div>
-
-        <div class="section-title section-gap">STAMPS</div>
-        <div class="form-row">
-          <label>Shape</label>
-          <select id="stamp-type" title="Stamp shape template">
-            <option value="organic">Organic Blob</option>
-            <option value="elongated">Elongated</option>
-            <option value="brick">Brick</option>
-            <option value="digital">Digital (Pixel)</option>
-            <option value="splatter">Splatter</option>
-          </select>
-        </div>
-        <div class="check-row" style="margin-bottom:6px">
-          <label class="chk-label" title="Hard solid silhouette (off = soft falloff)"><input type="checkbox" id="stamp-hard" checked> Hard edge</label>
-        </div>
-        <div class="stamp-controls">
-          <button id="btn-gen-stamp" title="Bake a random shape into a reusable stamp">+ New</button>
-          <button id="btn-import-stamp" title="Import an image as a stamp">Import</button>
-          <button id="btn-clear-stamp" title="Go back to procedural blobs">Procedural</button>
-        </div>
-        <input type="file" id="stamp-file" accept="image/*" style="display:none">
-        <div id="stamp-library"></div>
-        <div class="check-row stamp-rot-row">
-          <label class="chk-label" title="Random rotation per click"><input type="checkbox" id="stamp-randrot" checked> Rand rotate</label>
+        <div class="tool-section" data-show-for="blob">
+          <div class="section-title section-gap">BLOB</div>
+          <div class="form-row">
+            <label>Style</label>
+            <select id="blob-style" title="Blob edge character">
+              <option value="organic">Organic</option>
+              <option value="jagged">Jagged</option>
+              <option value="cloud">Cloud</option>
+              <option value="splat">Splat</option>
+              <option value="elongated">Elongated</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Action</label>
+            <select id="blob-mode" title="How the blob is applied">
+              <option value="paint">Paint (drag)</option>
+              <option value="single">Single click</option>
+              <option value="layered">Layered click</option>
+              <option value="path">Path (drag)</option>
+            </select>
+          </div>
+          <div class="check-row blob-vary-row">
+            <label class="chk-label" title="Each blob is a unique random shape"><input type="checkbox" id="blob-vary" checked> Vary shapes</label>
+          </div>
+          <div class="slider-row">
+            <label title="Edge jaggedness amount (auto = scale with size)">Jagged</label>
+            <div class="slider-track"><input type="range" id="blob-jaggedness" min="0" max="100" value="0"></div>
+            <span class="sl-val" id="blob-jaggedness-val">auto</span>
+          </div>
+          <div class="slider-row blob-path-only">
+            <label title="Path mode: how much stroke speed thins the line">Pressure</label>
+            <div class="slider-track"><input type="range" id="blob-pressure" min="0" max="100" value="50"></div>
+            <span class="sl-val" id="blob-pressure-val">50%</span>
+          </div>
         </div>
 
-        <div class="section-title section-gap">SPRAY TOOL</div>
-        <div class="form-row">
-          <label>Type</label>
-          <select id="spray-type">
-            <option value="uniform">Uniform</option>
-            <option value="cluster">Cluster</option>
-            <option value="splatter">Splatter</option>
-          </select>
+        <div class="tool-section" data-show-for="blob">
+          <div class="section-title section-gap">STAMPS</div>
+          <div class="form-row">
+            <label>Shape</label>
+            <select id="stamp-type" title="Stamp shape template">
+              <option value="organic">Organic Blob</option>
+              <option value="elongated">Elongated</option>
+              <option value="brick">Brick</option>
+              <option value="digital">Digital (Pixel)</option>
+              <option value="splatter">Splatter</option>
+            </select>
+          </div>
+          <div class="check-row" style="margin-bottom:6px">
+            <label class="chk-label" title="Hard solid silhouette (off = soft falloff)"><input type="checkbox" id="stamp-hard" checked> Hard edge</label>
+          </div>
+          <div class="stamp-controls">
+            <button id="btn-gen-stamp" title="Bake a random shape into a reusable stamp">+ New</button>
+            <button id="btn-import-stamp" title="Import an image as a stamp">Import</button>
+            <button id="btn-clear-stamp" title="Go back to procedural blobs">Procedural</button>
+          </div>
+          <input type="file" id="stamp-file" accept="image/*" style="display:none">
+          <div id="stamp-library"></div>
+          <div class="check-row stamp-rot-row">
+            <label class="chk-label" title="Random rotation per click"><input type="checkbox" id="stamp-randrot" checked> Rand rotate</label>
+          </div>
         </div>
 
-        <div class="section-title section-gap">SHAPE TOOL</div>
-        <div class="form-row">
-          <label>Type</label>
-          <select id="shape-mode" title="Rectangle/Ellipse -- applies when Rect tool is active">
-            <option value="rect">Rectangle</option>
-            <option value="ellipse">Ellipse</option>
-          </select>
-        </div>
-        <div class="check-row">
-          <label class="chk-label"><input type="checkbox" id="shape-filled"> Filled</label>
+        <div class="tool-section" data-show-for="spray">
+          <div class="section-title section-gap">SPRAY</div>
+          <div class="form-row">
+            <label>Type</label>
+            <select id="spray-type">
+              <option value="uniform">Uniform</option>
+              <option value="cluster">Cluster</option>
+              <option value="splatter">Splatter</option>
+              <option value="stipple">Stipple</option>
+              <option value="fleck">Fleck</option>
+            </select>
+          </div>
+          <div class="slider-row">
+            <label title="Number of dots per spray step (scales with brush size)">Density</label>
+            <div class="slider-track"><input type="range" id="spray-density" min="10" max="400" value="100"></div>
+            <span class="sl-val" id="spray-density-val">100%</span>
+          </div>
+          <div class="slider-row">
+            <label title="0 = solid in center, 1 = soft falloff to edge">Falloff</label>
+            <div class="slider-track"><input type="range" id="spray-falloff" min="0" max="100" value="100"></div>
+            <span class="sl-val" id="spray-falloff-val">100%</span>
+          </div>
+          <div class="slider-row spray-cluster-only">
+            <label title="Cluster tightness (low = tight cluster, high = wide cloud)">Tight</label>
+            <div class="slider-track"><input type="range" id="spray-tight" min="10" max="100" value="40"></div>
+            <span class="sl-val" id="spray-tight-val">40%</span>
+          </div>
+          <div class="slider-row spray-splatter-only">
+            <label title="Maximum dot radius for splatter mode">Dot Max</label>
+            <div class="slider-track"><input type="range" id="spray-dotmax" min="1" max="40" value="6"></div>
+            <span class="sl-val" id="spray-dotmax-val">6</span>
+          </div>
+          <div class="slider-row spray-fleck-only">
+            <label title="Per-fleck shape jitter">Shape</label>
+            <div class="slider-track"><input type="range" id="spray-fleckjit" min="0" max="100" value="60"></div>
+            <span class="sl-val" id="spray-fleckjit-val">60%</span>
+          </div>
         </div>
 
+        <div class="tool-section" data-show-for="fill">
+          <div class="section-title section-gap">FILL</div>
+          <div class="slider-row">
+            <label title="Color-distance threshold (0 = exact match, 255 = fills everything)">Tolerance</label>
+            <div class="slider-track"><input type="range" id="fill-tolerance" min="0" max="255" value="30"></div>
+            <span class="sl-val" id="fill-tolerance-val">30</span>
+          </div>
+        </div>
+
+        <div class="tool-section" data-show-for="rect ellipse">
+          <div class="section-title section-gap">SHAPE</div>
+          <div class="form-row">
+            <label>Type</label>
+            <select id="shape-mode" title="Rectangle/Ellipse -- applies when Rect tool is active">
+              <option value="rect">Rectangle</option>
+              <option value="ellipse">Ellipse</option>
+            </select>
+          </div>
+          <div class="check-row">
+            <label class="chk-label"><input type="checkbox" id="shape-filled"> Filled</label>
+          </div>
+        </div>
+
+        <div class="section-title section-gap">PAINT</div>
         <div class="slider-row">
           <label>Size</label>
           <div class="slider-track"><input type="range" id="brush-size" min="1" max="512" value="20"></div>
@@ -436,6 +505,16 @@
           <label>Spacing</label>
           <div class="slider-track"><input type="range" id="brush-spacing" min="5" max="100" value="30"></div>
           <span class="sl-val" id="brush-spacing-val">30%</span>
+        </div>
+        <div class="slider-row">
+          <label title="Random dab-position jitter (brush/eraser/smear/blob/spray)">Scatter</label>
+          <div class="slider-track"><input type="range" id="brush-scatter" min="0" max="200" value="0"></div>
+          <span class="sl-val" id="brush-scatter-val">0%</span>
+        </div>
+        <div class="slider-row">
+          <label title="When scatter is on, spreads dabs out so coverage builds gradually instead of filling fast">Sc Rate</label>
+          <div class="slider-track"><input type="range" id="brush-scatter-rate" min="100" max="1000" value="100"></div>
+          <span class="sl-val" id="brush-scatter-rate-val">1.0x</span>
         </div>
 
         <div class="section-title section-gap">SYMMETRY</div>
